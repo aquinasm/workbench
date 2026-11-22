@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    Manager, RunEvent,
+    Emitter, Manager, RunEvent,
 };
 use telemetry::{SharedTelemetry, TelemetryState};
 use tokio::sync::Mutex;
@@ -57,12 +57,15 @@ pub fn run() {
                             let sup = app.state::<SharedSupervisor>().inner().clone();
                             tauri::async_runtime::spawn(async move {
                                 let _ = services::start_all_services(&app_h, &sup).await;
+                                let _ = app_h.emit("services-changed", ());
                             });
                         }
                         "stop_all" => {
+                            let app_h = app.clone();
                             let sup = app.state::<SharedSupervisor>().inner().clone();
                             tauri::async_runtime::spawn(async move {
                                 stop_all_services(&sup).await;
+                                let _ = app_h.emit("services-changed", ());
                             });
                         }
                         "quit" => {

@@ -155,6 +155,15 @@ class WorkbenchStore {
 					[ev.service_id]: [...existing.slice(-249), ev.line]
 				};
 			}),
+			api.onServicesChanged(() => {
+				void this.refreshServices();
+				void api
+					.getConfig()
+					.then((cfg) => {
+						this.config = cfg;
+					})
+					.catch(() => {});
+			}),
 			api.onRuntimeProgress((ev) => {
 				const key = `${ev.tool}:${ev.version}`;
 				if (ev.stage === 'done') {

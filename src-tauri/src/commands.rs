@@ -605,15 +605,20 @@ pub async fn list_services_cmd(
 
 #[tauri::command]
 pub async fn install_service_cmd(app: AppHandle, service_id: String) -> Result<(), String> {
-    install_service(&app, &service_id).await
+    let res = install_service(&app, &service_id).await;
+    let _ = app.emit("services-changed", ());
+    res
 }
 
 #[tauri::command]
 pub async fn uninstall_service_cmd(
+    app: AppHandle,
     sup: State<'_, SharedSupervisor>,
     service_id: String,
 ) -> Result<(), String> {
-    uninstall_service(&sup, &service_id).await
+    let res = uninstall_service(&sup, &service_id).await;
+    let _ = app.emit("services-changed", ());
+    res
 }
 
 #[tauri::command]
@@ -623,15 +628,20 @@ pub async fn start_service_cmd(
     service_id: String,
     port: Option<u16>,
 ) -> Result<ServiceStatusInfo, String> {
-    start_service(&app, &sup, &service_id, port).await
+    let res = start_service(&app, &sup, &service_id, port).await;
+    let _ = app.emit("services-changed", ());
+    res
 }
 
 #[tauri::command]
 pub async fn stop_service_cmd(
+    app: AppHandle,
     sup: State<'_, SharedSupervisor>,
     service_id: String,
 ) -> Result<(), String> {
-    stop_service(&sup, &service_id).await
+    let res = stop_service(&sup, &service_id).await;
+    let _ = app.emit("services-changed", ());
+    res
 }
 
 #[tauri::command]
@@ -641,7 +651,9 @@ pub async fn restart_service_cmd(
     service_id: String,
     port: Option<u16>,
 ) -> Result<ServiceStatusInfo, String> {
-    restart_service(&app, &sup, &service_id, port).await
+    let res = restart_service(&app, &sup, &service_id, port).await;
+    let _ = app.emit("services-changed", ());
+    res
 }
 
 #[tauri::command]
@@ -649,12 +661,18 @@ pub async fn start_all_services_cmd(
     app: AppHandle,
     sup: State<'_, SharedSupervisor>,
 ) -> Result<Vec<String>, String> {
-    start_all_services(&app, &sup).await
+    let res = start_all_services(&app, &sup).await;
+    let _ = app.emit("services-changed", ());
+    res
 }
 
 #[tauri::command]
-pub async fn stop_all_services_cmd(sup: State<'_, SharedSupervisor>) -> Result<(), String> {
+pub async fn stop_all_services_cmd(
+    app: AppHandle,
+    sup: State<'_, SharedSupervisor>,
+) -> Result<(), String> {
     stop_all_services(&sup).await;
+    let _ = app.emit("services-changed", ());
     Ok(())
 }
 

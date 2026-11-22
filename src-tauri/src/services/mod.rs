@@ -1304,6 +1304,7 @@ pub async fn start_service(
                     },
                 );
             }
+            let _ = app_c.emit("services-changed", ());
         });
     }
 
@@ -1326,6 +1327,7 @@ pub async fn start_service(
                     },
                 );
             }
+            let _ = app_c.emit("services-changed", ());
         });
     }
 

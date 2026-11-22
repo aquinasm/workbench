@@ -143,6 +143,8 @@ export const api = {
 		listen<ServiceLogEvent>('service-log', (e) => cb(e.payload)),
 	onServiceProgress: (cb: (payload: ServiceProgressEvent) => void): Promise<UnlistenFn> =>
 		listen<ServiceProgressEvent>('service-progress', (e) => cb(e.payload)),
+	onServicesChanged: (cb: () => void): Promise<UnlistenFn> =>
+		listen<void>('services-changed', () => cb()),
 
 	// PHP Extensions & php.ini
 	inspectPhpVersion: (version: string) =>
