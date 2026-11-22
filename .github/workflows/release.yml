@@ -41,24 +41,17 @@ jobs:
             TITLE="Workbench $TAG"
           fi
 
-          # Check if release already exists for this tag
-          EXISTING_ID=$(gh api "repos/${{ github.repository }}/releases/tags/$TAG" --jq '.id' 2>/dev/null || true)
-          if [ -n "$EXISTING_ID" ] && [ "$EXISTING_ID" != "null" ]; then
-            echo "id=$EXISTING_ID" >> "$GITHUB_OUTPUT"
-            exit 0
+          # Create the release if it does not exist yet
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            if [ "$PRERELEASE" = "true" ]; then
+              gh release create "$TAG" --prerelease --title "$TITLE" --notes "Cross-platform local development environment built with Tauri v2, Rust, and SvelteKit."
+            else
+              gh release create "$TAG" --title "$TITLE" --notes "Cross-platform local development environment built with Tauri v2, Rust, and SvelteKit."
+            fi
           fi
 
-          CREATED_ID=$(gh api \
-            --method POST \
-            -H "Accept: application/vnd.github+json" \
-            "repos/${{ github.repository }}/releases" \
-            -f tag_name="$TAG" \
-            -f name="$TITLE" \
-            -f body="Cross-platform local development environment built with Tauri v2, Rust, and SvelteKit." \
-            -F draft=false \
-            -F prerelease="$PRERELEASE" \
-            --jq '.id')
-          echo "id=$CREATED_ID" >> "$GITHUB_OUTPUT"
+          RELEASE_ID=$(gh release view "$TAG" --json databaseId --jq '.databaseId')
+          echo "id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
 
   build-tauri:
     name: Build (${{ matrix.label }})
