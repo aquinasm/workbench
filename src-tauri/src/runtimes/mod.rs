@@ -585,6 +585,7 @@ pub async fn install_runtime(
             platform,
             &staging_dir,
             &extract_dir,
+            &final_dir,
             |pct, dl, tot| {
                 downloaded = dl;
                 total_bytes = tot;

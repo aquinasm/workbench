@@ -511,6 +511,7 @@ pub async fn install_service(app: &AppHandle, service_id: &str) -> Result<(), St
             platform,
             &staging,
             &extract_dir,
+            &final_dir,
             |pct, _, _| {
                 if pct >= last_pct + 2 || pct >= 95 {
                     last_pct = pct;
@@ -1758,7 +1759,7 @@ pub fn sync_hosts_file() -> Result<NetworkStatus, String> {
     #[cfg(target_os = "macos")]
     {
         // Pass path via argv and use AppleScript `quoted form of` to eliminate injection risks
-        let script = "on run argv\nset src to item 1 of argv\ndo shell script \"cp \" & quoted form of src & \" /etc/hosts && dscacheutil -flushcache\" with administrator privileges\nend run";
+        let script = "on run argv\nset src to item 1 of argv\ndo shell script \"cp \" & quoted form of src & \" /etc/hosts && chmod 644 /etc/hosts && dscacheutil -flushcache && killall -HUP mDNSResponder\" with administrator privileges\nend run";
         let out = std::process::Command::new("osascript")
             .args(["-e", script, "--", &staged_str])
             .output()
@@ -1871,22 +1872,33 @@ pub async fn trust_local_ca(app: &AppHandle, sup: &SharedSupervisor) -> Result<S
             }
             if cert.is_file() {
                 let cert_str = cert.to_string_lossy().to_string();
-                let script = "on run argv\nset certPath to item 1 of argv\ndo shell script \"security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain \" & quoted form of certPath with administrator privileges\nend run";
+                let login_keychain = dirs::home_dir()
+                    .map(|h| h.join("Library/Keychains/login.keychain-db"))
+                    .filter(|p| p.exists())
+                    .map(|p| p.to_string_lossy().to_string());
+
+                // Run `security add-trusted-cert` directly inside the user's interactive Aqua GUI session
+                // (without `osascript ... with administrator privileges`, which blocks SecTrustSettingsSetTrustSettings
+                // on macOS Sonoma/Sequoia/Tahoe with "authorization was denied since no user interaction was possible").
                 let out = tokio::task::spawn_blocking(move || {
-                    std::process::Command::new("osascript")
-                        .args(["-e", script, "--", &cert_str])
-                        .output()
+                    let mut cmd = std::process::Command::new("security");
+                    cmd.args(["add-trusted-cert", "-r", "trustRoot"]);
+                    if let Some(kc) = login_keychain {
+                        cmd.args(["-k", &kc]);
+                    }
+                    cmd.arg(&cert_str);
+                    cmd.output()
                 })
                 .await
                 .map_err(|e| format!("Trust CA task failed: {}", e))?
-                .map_err(|e| format!("Failed launching macOS elevation prompt: {}", e))?;
+                .map_err(|e| format!("Failed launching macOS Keychain trust prompt: {}", e))?;
 
                 if out.status.success() {
-                    return Ok("Caddy local root CA added to macOS System Keychain.".to_string());
+                    return Ok("Caddy local root CA added to your macOS Login Keychain.".to_string());
                 }
                 let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
                 return Err(if err.is_empty() {
-                    "Administrator permission was cancelled.".to_string()
+                    "Keychain trust authorization was cancelled.".to_string()
                 } else {
                     err
                 });

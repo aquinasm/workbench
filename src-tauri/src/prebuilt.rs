@@ -62,7 +62,7 @@ pub async fn resolve_static_php_url(
     let prefix = format!("php-{}.{}.", major, minor);
     let suffix = format!("-cli-{}.tar.gz", arch_suffix);
 
-    let index_url = "https://dl.static-php.dev/static-php-cli/common/";
+    let index_url = "https://dl.static-php.dev/static-php-cli/bulk/";
     let html = client
         .get(index_url)
         .send()
@@ -330,13 +330,14 @@ fn unpack_bottle_tar_gz(archive_path: &Path, dest: &Path) -> Result<(), String> 
     Ok(())
 }
 
-/// Rewrites `@@HOMEBREW_PREFIX@@` / `@@HOMEBREW_CELLAR@@` placeholders in extracted configs and Mach-O headers.
-fn relocate_extracted_prefix(dest: &Path) {
-    let dest_str = dest.to_string_lossy().to_string();
+/// Rewrites `@@HOMEBREW_PREFIX@@` / `@@HOMEBREW_CELLAR@@` placeholders in extracted configs and Mach-O headers
+/// so they point to `final_dir` (the permanent install location) rather than the temporary staging directory.
+fn relocate_extracted_prefix(extract_dir: &Path, final_dir: &Path) {
+    let final_str = final_dir.to_string_lossy().to_string();
 
-    // 1. Rewrite text config & wrapper script placeholders in bin/, sbin/, etc/, share/
+    // 1. Rewrite text config & wrapper script placeholders in bin/, sbin/, etc/, lib/pkgconfig/
     for sub in ["bin", "sbin", "etc", "lib/pkgconfig"] {
-        let dir = dest.join(sub);
+        let dir = extract_dir.join(sub);
         if !dir.is_dir() {
             continue;
         }
@@ -353,8 +354,8 @@ fn relocate_extracted_prefix(dest: &Path) {
             }
             if let Ok(text) = fs::read_to_string(&path) {
                 if text.contains("@@HOMEBREW_") {
-                    let mut patched = text.replace("@@HOMEBREW_PREFIX@@", &dest_str);
-                    // Also replace @@HOMEBREW_CELLAR@@/<pkg>/<ver> with dest_str
+                    let mut patched = text.replace("@@HOMEBREW_PREFIX@@", &final_str);
+                    // Also replace @@HOMEBREW_CELLAR@@/<pkg>/<ver> with final_str
                     while let Some(idx) = patched.find("@@HOMEBREW_CELLAR@@/") {
                         let rest = &patched[idx + "@@HOMEBREW_CELLAR@@/".len()..];
                         let mut slash_count = 0;
@@ -374,9 +375,9 @@ fn relocate_extracted_prefix(dest: &Path) {
                         if end_offset > 0 {
                             let to_replace =
                                 &patched[idx..idx + "@@HOMEBREW_CELLAR@@/".len() + end_offset];
-                            patched = patched.replace(to_replace, &dest_str);
+                            patched = patched.replace(to_replace, &final_str);
                         } else {
-                            patched = patched.replace("@@HOMEBREW_CELLAR@@", &dest_str);
+                            patched = patched.replace("@@HOMEBREW_CELLAR@@", &final_str);
                             break;
                         }
                     }
@@ -397,19 +398,43 @@ fn relocate_extracted_prefix(dest: &Path) {
         }
     }
 
-    // 2. On macOS, patch Mach-O load commands referencing @@HOMEBREW_ or /opt/homebrew/ to point to dest/lib/<leaf>
+    // 2. On macOS, patch Mach-O load commands referencing @@HOMEBREW_ or /opt/homebrew/ to point to final_dir/lib/...
     #[cfg(target_os = "macos")]
     {
         use std::os::unix::fs::PermissionsExt;
         use std::process::Command;
 
-        let lib_dir = dest.join("lib");
+        let extract_lib_dir = extract_dir.join("lib");
+        let final_lib_dir = final_dir.join("lib");
+
+        // Index all dylib/so filenames under extract_dir/lib so nested libraries resolve to their exact final path
+        let mut lib_index: HashMap<String, PathBuf> = HashMap::new();
+        if extract_lib_dir.is_dir() {
+            for entry in jwalk::WalkDir::new(&extract_lib_dir)
+                .max_depth(4)
+                .into_iter()
+                .flatten()
+            {
+                let p = entry.path();
+                if let (Some(name), Ok(rel)) = (
+                    p.file_name().and_then(|n| n.to_str()),
+                    p.strip_prefix(extract_dir),
+                ) {
+                    if name.ends_with(".dylib") || name.ends_with(".so") {
+                        lib_index
+                            .entry(name.to_string())
+                            .or_insert_with(|| final_dir.join(rel));
+                    }
+                }
+            }
+        }
+
         for sub in ["bin", "sbin", "lib", "libexec"] {
-            let dir = dest.join(sub);
+            let dir = extract_dir.join(sub);
             if !dir.is_dir() {
                 continue;
             }
-            for entry in jwalk::WalkDir::new(&dir).max_depth(3).into_iter().flatten() {
+            for entry in jwalk::WalkDir::new(&dir).max_depth(4).into_iter().flatten() {
                 let path = entry.path();
                 if !path.is_file() || entry.path_is_symlink() {
                     continue;
@@ -431,25 +456,31 @@ fn relocate_extracted_prefix(dest: &Path) {
                         .trim();
                     if dep.starts_with("@@HOMEBREW_") || dep.starts_with("/opt/homebrew/") {
                         if let Some(leaf) = dep.rsplit('/').next() {
-                            let candidate = lib_dir.join(leaf);
-                            let resolved = if candidate.exists() {
-                                candidate.to_string_lossy().to_string()
+                            let resolved = if extract_lib_dir.join(leaf).exists() {
+                                final_lib_dir.join(leaf).to_string_lossy().to_string()
+                            } else if let Some(indexed) = lib_index.get(leaf) {
+                                indexed.to_string_lossy().to_string()
                             } else {
-                                // Search subdirectories of lib/ (e.g. lib/ossl-modules or versioned subdirs)
-                                format!("{}/{}", lib_dir.display(), leaf)
+                                final_lib_dir.join(leaf).to_string_lossy().to_string()
                             };
                             changes.push((dep.to_string(), resolved));
                         }
                     }
                 }
-                if !changes.is_empty() {
+                let is_dylib = matches!(
+                    path.extension().and_then(|e| e.to_str()),
+                    Some("dylib") | Some("so")
+                );
+                if !changes.is_empty() || is_dylib {
                     if let Ok(meta) = path.metadata() {
                         let orig_mode = meta.permissions().mode();
                         let _ = fs::set_permissions(&path, fs::Permissions::from_mode(orig_mode | 0o200));
                     }
                     let mut cmd = Command::new("install_name_tool");
-                    if path.extension().and_then(|e| e.to_str()) == Some("dylib") {
-                        cmd.arg("-id").arg(&path);
+                    if is_dylib {
+                        if let Ok(rel) = path.strip_prefix(extract_dir) {
+                            cmd.arg("-id").arg(final_dir.join(rel));
+                        }
                     }
                     for (old, new) in &changes {
                         cmd.arg("-change").arg(old).arg(new);
@@ -467,13 +498,14 @@ fn relocate_extracted_prefix(dest: &Path) {
 }
 
 /// Pure-Rust installer that resolves a prebuilt bottle and its dependencies from `formulae.brew.sh` + `ghcr.io`,
-/// verifies every SHA-256 checksum, extracts into `extract_dir`, and relocates shared library paths.
+/// verifies every SHA-256 checksum, extracts into `extract_dir`, and relocates shared library paths to `final_dir`.
 pub async fn install_homebrew_bottle_tree<F>(
     client: &reqwest::Client,
     formula_api_url: &str,
     platform_key: &str,
     staging_dir: &Path,
     extract_dir: &Path,
+    final_dir: &Path,
     mut on_progress: F,
 ) -> Result<(), String>
 where
@@ -576,8 +608,9 @@ where
 
     on_progress(97, 0, 0);
     let ed_reloc = extract_dir.to_path_buf();
+    let fd_reloc = final_dir.to_path_buf();
     tokio::task::spawn_blocking(move || {
-        relocate_extracted_prefix(&ed_reloc);
+        relocate_extracted_prefix(&ed_reloc, &fd_reloc);
     })
     .await
     .map_err(|e| format!("Bottle relocation task error: {}", e))?;

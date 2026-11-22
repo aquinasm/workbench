@@ -30,15 +30,15 @@
       "version": "8.5.8",
       "label": "PHP 8.5 (Stable)",
       "channel": "stable",
-      "size_hint_mb": 33,
+      "size_hint_mb": 48,
       "targets": {
         "macos-aarch64": {
-          "url": "https://dl.static-php.dev/static-php-cli/common/php-8.5.8-cli-macos-aarch64.tar.gz",
+          "url": "https://dl.static-php.dev/static-php-cli/bulk/php-8.5.8-cli-macos-aarch64.tar.gz",
           "format": "tar.gz",
           "strip_components": 0
         },
         "linux-x86_64": {
-          "url": "https://dl.static-php.dev/static-php-cli/common/php-8.5.8-cli-linux-x86_64.tar.gz",
+          "url": "https://dl.static-php.dev/static-php-cli/bulk/php-8.5.8-cli-linux-x86_64.tar.gz",
           "format": "tar.gz",
           "strip_components": 0
         },
@@ -54,15 +54,15 @@
       "version": "8.4.23",
       "label": "PHP 8.4 (LTS)",
       "channel": "lts",
-      "size_hint_mb": 32,
+      "size_hint_mb": 48,
       "targets": {
         "macos-aarch64": {
-          "url": "https://dl.static-php.dev/static-php-cli/common/php-8.4.23-cli-macos-aarch64.tar.gz",
+          "url": "https://dl.static-php.dev/static-php-cli/bulk/php-8.4.23-cli-macos-aarch64.tar.gz",
           "format": "tar.gz",
           "strip_components": 0
         },
         "linux-x86_64": {
-          "url": "https://dl.static-php.dev/static-php-cli/common/php-8.4.23-cli-linux-x86_64.tar.gz",
+          "url": "https://dl.static-php.dev/static-php-cli/bulk/php-8.4.23-cli-linux-x86_64.tar.gz",
           "format": "tar.gz",
           "strip_components": 0
         },
@@ -78,15 +78,15 @@
       "version": "8.3.32",
       "label": "PHP 8.3 (Security)",
       "channel": "maintenance",
-      "size_hint_mb": 31,
+      "size_hint_mb": 46,
       "targets": {
         "macos-aarch64": {
-          "url": "https://dl.static-php.dev/static-php-cli/common/php-8.3.32-cli-macos-aarch64.tar.gz",
+          "url": "https://dl.static-php.dev/static-php-cli/bulk/php-8.3.32-cli-macos-aarch64.tar.gz",
           "format": "tar.gz",
           "strip_components": 0
         },
         "linux-x86_64": {
-          "url": "https://dl.static-php.dev/static-php-cli/common/php-8.3.32-cli-linux-x86_64.tar.gz",
+          "url": "https://dl.static-php.dev/static-php-cli/bulk/php-8.3.32-cli-linux-x86_64.tar.gz",
           "format": "tar.gz",
           "strip_components": 0
         },
