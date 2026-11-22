@@ -110,6 +110,7 @@ export const api = {
 	// Phase 3: Services supervisor, local sites & phpMyAdmin
 	listServices: () => invoke<ServiceStatusInfo[]>('list_services_cmd'),
 	installService: (serviceId: string) => invoke<void>('install_service_cmd', { serviceId }),
+	uninstallService: (serviceId: string) => invoke<void>('uninstall_service_cmd', { serviceId }),
 	startService: (serviceId: string, port?: number) =>
 		invoke<ServiceStatusInfo>('start_service_cmd', { serviceId, port: port ?? null }),
 	stopService: (serviceId: string) => invoke<void>('stop_service_cmd', { serviceId }),

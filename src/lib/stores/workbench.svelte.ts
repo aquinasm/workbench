@@ -553,6 +553,16 @@ class WorkbenchStore {
 		}
 	}
 
+	async uninstallService(serviceId: string) {
+		try {
+			await api.uninstallService(serviceId);
+			this.showToast(`Uninstalled managed ${serviceId}`, 'info');
+			await this.refreshServices();
+		} catch (e) {
+			this.showToast(`Uninstall failed: ${e}`, 'error');
+		}
+	}
+
 	async startService(serviceId: string, port?: number) {
 		try {
 			await api.startService(serviceId, port);

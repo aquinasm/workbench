@@ -8,6 +8,7 @@
 		Play,
 		Square,
 		Download,
+		Trash2,
 		ExternalLink,
 		Terminal,
 		RefreshCw,
@@ -302,6 +303,17 @@
 							>
 								<Download class="h-3.5 w-3.5" />
 								Install (~{svc.size_hint_mb} MB)
+							</button>
+						{/if}
+
+						{#if svc.installed_managed && !isRunning && !prog}
+							<button
+								type="button"
+								title="Uninstall managed {svc.name} binaries (preserves data)"
+								onclick={() => wb.uninstallService(svc.id)}
+								class="wb-btn px-2.5 hover:text-[var(--danger)]"
+							>
+								<Trash2 class="h-3.5 w-3.5" />
 							</button>
 						{/if}
 

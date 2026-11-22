@@ -767,6 +767,27 @@ pub async fn install_service(app: &AppHandle, service_id: &str) -> Result<(), St
     Ok(())
 }
 
+pub async fn uninstall_service(sup: &SharedSupervisor, service_id: &str) -> Result<(), String> {
+    let manifest = load_services_manifest()?;
+    let svc = manifest
+        .services
+        .into_iter()
+        .find(|s| s.id == service_id)
+        .ok_or_else(|| format!("Unknown service: {}", service_id))?;
+
+    // Stop managed process first if running
+    let _ = stop_service(sup, service_id).await;
+
+    let install_dir = service_install_dir(&svc.id, &svc.version);
+    if install_dir.exists() {
+        tokio::task::spawn_blocking(move || fs::remove_dir_all(&install_dir))
+            .await
+            .map_err(|e| format!("Uninstall task failed: {}", e))?
+            .map_err(|e| format!("Failed removing managed {} binaries: {}", svc.name, e))?;
+    }
+    Ok(())
+}
+
 // --- Pure Config Generators (Caddyfile, Apache, phpMyAdmin, Redis) ---
 
 pub fn validate_local_site(site: &LocalSite) -> Result<(), String> {

@@ -108,6 +108,7 @@ pub fn run() {
             commands::set_project_pin_cmd,
             commands::list_services_cmd,
             commands::install_service_cmd,
+            commands::uninstall_service_cmd,
             commands::start_service_cmd,
             commands::stop_service_cmd,
             commands::restart_service_cmd,

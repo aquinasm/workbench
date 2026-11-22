@@ -21,8 +21,8 @@ use crate::runtimes::{
 use crate::services::{
     add_local_site, generate_apache_conf, generate_caddyfile, get_network_status, get_service_logs,
     install_service, list_services, remove_local_site, restart_service, start_all_services,
-    start_service, stop_all_services, stop_service, sync_hosts_file, trust_local_ca, NetworkStatus,
-    ServiceLogsResponse, ServiceStatusInfo, SharedSupervisor,
+    start_service, stop_all_services, stop_service, sync_hosts_file, trust_local_ca,
+    uninstall_service, NetworkStatus, ServiceLogsResponse, ServiceStatusInfo, SharedSupervisor,
 };
 use crate::shell::{
     clean_uninstall_workbench, detect_system_tools, get_shell_status, install_shell_integration,
@@ -606,6 +606,14 @@ pub async fn list_services_cmd(
 #[tauri::command]
 pub async fn install_service_cmd(app: AppHandle, service_id: String) -> Result<(), String> {
     install_service(&app, &service_id).await
+}
+
+#[tauri::command]
+pub async fn uninstall_service_cmd(
+    sup: State<'_, SharedSupervisor>,
+    service_id: String,
+) -> Result<(), String> {
+    uninstall_service(&sup, &service_id).await
 }
 
 #[tauri::command]
