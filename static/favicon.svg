@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <style>
+    .bg { fill: #1c1c1e; }
+    .border { stroke: #38383a; }
+    .eyes { stroke: #f5f5f7; }
+    .mouth { fill: #00d4ff; }
+    @media (prefers-color-scheme: light) {
+      .bg { fill: #f5f5f7; }
+      .border { stroke: #d2d2d7; }
+      .eyes { stroke: #1d1d1f; }
+      .mouth { fill: #0082c8; }
+    }
+  </style>
+  <rect class="bg" x="48" y="48" width="928" height="928" rx="208" />
+  <rect class="border" x="54" y="54" width="916" height="916" rx="202" stroke-width="12" />
+
+  <path
+    class="eyes"
+    d="M 211 364 L 373 452 L 211 540"
+    stroke-width="58"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <rect class="mouth" x="410" y="634" width="174" height="54" rx="27" />
+
+  <path
+    class="eyes"
+    d="M 621 364 L 669 540 L 717 404 L 765 540 L 813 364"
+    stroke-width="56"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

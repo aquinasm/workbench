@@ -1,0 +1,251 @@
+{
+  "schema_version": 1,
+  "runtimes": [
+    {
+      "tool": "php",
+      "version": "8.4.4",
+      "label": "PHP 8.4 (Latest)",
+      "channel": "stable",
+      "size_hint_mb": 32,
+      "targets": {
+        "macos-aarch64": {
+          "url": "https://dl.static-php.dev/static-php-cli/common/php-8.4.4-cli-macos-aarch64.tar.gz",
+          "format": "tar.gz",
+          "strip_components": 0
+        },
+        "linux-x86_64": {
+          "url": "https://dl.static-php.dev/static-php-cli/common/php-8.4.4-cli-linux-x86_64.tar.gz",
+          "format": "tar.gz",
+          "strip_components": 0
+        },
+        "windows-x86_64": {
+          "url": "https://windows.php.net/downloads/releases/archives/php-8.4.4-nts-Win32-vs17-x64.zip",
+          "format": "zip",
+          "strip_components": 0
+        }
+      }
+    },
+    {
+      "tool": "php",
+      "version": "8.3.17",
+      "label": "PHP 8.3 (LTS)",
+      "channel": "lts",
+      "size_hint_mb": 31,
+      "targets": {
+        "macos-aarch64": {
+          "url": "https://dl.static-php.dev/static-php-cli/common/php-8.3.17-cli-macos-aarch64.tar.gz",
+          "format": "tar.gz",
+          "strip_components": 0
+        },
+        "linux-x86_64": {
+          "url": "https://dl.static-php.dev/static-php-cli/common/php-8.3.17-cli-linux-x86_64.tar.gz",
+          "format": "tar.gz",
+          "strip_components": 0
+        },
+        "windows-x86_64": {
+          "url": "https://windows.php.net/downloads/releases/archives/php-8.3.17-nts-Win32-vs17-x64.zip",
+          "format": "zip",
+          "strip_components": 0
+        }
+      }
+    },
+    {
+      "tool": "php",
+      "version": "8.2.27",
+      "label": "PHP 8.2 (Security)",
+      "channel": "maintenance",
+      "size_hint_mb": 30,
+      "targets": {
+        "macos-aarch64": {
+          "url": "https://dl.static-php.dev/static-php-cli/common/php-8.2.27-cli-macos-aarch64.tar.gz",
+          "format": "tar.gz",
+          "strip_components": 0
+        },
+        "linux-x86_64": {
+          "url": "https://dl.static-php.dev/static-php-cli/common/php-8.2.27-cli-linux-x86_64.tar.gz",
+          "format": "tar.gz",
+          "strip_components": 0
+        },
+        "windows-x86_64": {
+          "url": "https://windows.php.net/downloads/releases/archives/php-8.2.27-nts-Win32-vs17-x64.zip",
+          "format": "zip",
+          "strip_components": 0
+        }
+      }
+    },
+    {
+      "tool": "composer",
+      "version": "2.8.6",
+      "label": "Composer 2.8 (Latest)",
+      "channel": "stable",
+      "size_hint_mb": 3,
+      "targets": {
+        "macos-aarch64": {
+          "url": "https://getcomposer.org/download/2.8.6/composer.phar",
+          "format": "raw",
+          "filename": "composer.phar",
+          "strip_components": 0
+        },
+        "linux-x86_64": {
+          "url": "https://getcomposer.org/download/2.8.6/composer.phar",
+          "format": "raw",
+          "filename": "composer.phar",
+          "strip_components": 0
+        },
+        "windows-x86_64": {
+          "url": "https://getcomposer.org/download/2.8.6/composer.phar",
+          "format": "raw",
+          "filename": "composer.phar",
+          "strip_components": 0
+        }
+      }
+    },
+    {
+      "tool": "composer",
+      "version": "2.7.9",
+      "label": "Composer 2.7",
+      "channel": "maintenance",
+      "size_hint_mb": 3,
+      "targets": {
+        "macos-aarch64": {
+          "url": "https://getcomposer.org/download/2.7.9/composer.phar",
+          "format": "raw",
+          "filename": "composer.phar",
+          "strip_components": 0
+        },
+        "linux-x86_64": {
+          "url": "https://getcomposer.org/download/2.7.9/composer.phar",
+          "format": "raw",
+          "filename": "composer.phar",
+          "strip_components": 0
+        },
+        "windows-x86_64": {
+          "url": "https://getcomposer.org/download/2.7.9/composer.phar",
+          "format": "raw",
+          "filename": "composer.phar",
+          "strip_components": 0
+        }
+      }
+    },
+    {
+      "tool": "node",
+      "version": "22.14.0",
+      "label": "Node.js 22 LTS (Jod)",
+      "channel": "lts",
+      "size_hint_mb": 42,
+      "targets": {
+        "macos-aarch64": {
+          "url": "https://nodejs.org/dist/v22.14.0/node-v22.14.0-darwin-arm64.tar.gz",
+          "format": "tar.gz",
+          "strip_components": 1
+        },
+        "linux-x86_64": {
+          "url": "https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-x64.tar.xz",
+          "format": "tar.xz",
+          "strip_components": 1
+        },
+        "windows-x86_64": {
+          "url": "https://nodejs.org/dist/v22.14.0/node-v22.14.0-win-x64.zip",
+          "format": "zip",
+          "strip_components": 1
+        }
+      }
+    },
+    {
+      "tool": "node",
+      "version": "20.18.3",
+      "label": "Node.js 20 LTS (Iron)",
+      "channel": "lts",
+      "size_hint_mb": 40,
+      "targets": {
+        "macos-aarch64": {
+          "url": "https://nodejs.org/dist/v20.18.3/node-v20.18.3-darwin-arm64.tar.gz",
+          "format": "tar.gz",
+          "strip_components": 1
+        },
+        "linux-x86_64": {
+          "url": "https://nodejs.org/dist/v20.18.3/node-v20.18.3-linux-x64.tar.xz",
+          "format": "tar.xz",
+          "strip_components": 1
+        },
+        "windows-x86_64": {
+          "url": "https://nodejs.org/dist/v20.18.3/node-v20.18.3-win-x64.zip",
+          "format": "zip",
+          "strip_components": 1
+        }
+      }
+    },
+    {
+      "tool": "node",
+      "version": "18.20.7",
+      "label": "Node.js 18 (Legacy)",
+      "channel": "maintenance",
+      "size_hint_mb": 38,
+      "targets": {
+        "macos-aarch64": {
+          "url": "https://nodejs.org/dist/v18.20.7/node-v18.20.7-darwin-arm64.tar.gz",
+          "format": "tar.gz",
+          "strip_components": 1
+        },
+        "linux-x86_64": {
+          "url": "https://nodejs.org/dist/v18.20.7/node-v18.20.7-linux-x64.tar.xz",
+          "format": "tar.xz",
+          "strip_components": 1
+        },
+        "windows-x86_64": {
+          "url": "https://nodejs.org/dist/v18.20.7/node-v18.20.7-win-x64.zip",
+          "format": "zip",
+          "strip_components": 1
+        }
+      }
+    },
+    {
+      "tool": "flutter",
+      "version": "3.29.0",
+      "label": "Flutter 3.29 (Stable)",
+      "channel": "stable",
+      "size_hint_mb": 980,
+      "targets": {
+        "macos-aarch64": {
+          "url": "https://storage.googleapis.com/flutter_infra_release/releases/stable/macos/flutter_macos_arm64_3.29.0-stable.zip",
+          "format": "zip",
+          "strip_components": 1
+        },
+        "linux-x86_64": {
+          "url": "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.29.0-stable.tar.xz",
+          "format": "tar.xz",
+          "strip_components": 1
+        },
+        "windows-x86_64": {
+          "url": "https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/flutter_windows_3.29.0-stable.zip",
+          "format": "zip",
+          "strip_components": 1
+        }
+      }
+    },
+    {
+      "tool": "flutter",
+      "version": "3.27.4",
+      "label": "Flutter 3.27",
+      "channel": "stable",
+      "size_hint_mb": 950,
+      "targets": {
+        "macos-aarch64": {
+          "url": "https://storage.googleapis.com/flutter_infra_release/releases/stable/macos/flutter_macos_arm64_3.27.4-stable.zip",
+          "format": "zip",
+          "strip_components": 1
+        },
+        "linux-x86_64": {
+          "url": "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.27.4-stable.tar.xz",
+          "format": "tar.xz",
+          "strip_components": 1
+        },
+        "windows-x86_64": {
+          "url": "https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/flutter_windows_3.27.4-stable.zip",
+          "format": "zip",
+          "strip_components": 1
+        }
+      }
+    }
+  ]
+}

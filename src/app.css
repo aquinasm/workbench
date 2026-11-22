@@ -1,0 +1,534 @@
+@import 'tailwindcss';
+
+:root {
+	/* Workbench — Apple Charcoal Black & TRON Blue (Dark) / Chalk & TRON Blue (Light) */
+	--bg-app-light: #f5f5f7;
+	--bg-app-dark: #161617;
+
+	--bg-sidebar-light: #ebebee;
+	--bg-sidebar-dark: #1c1c1e;
+
+	--bg-surface-light: #ffffff;
+	--bg-surface-dark: #222224;
+
+	--bg-elevated-light: #e5e5ea;
+	--bg-elevated-dark: #2c2c2e;
+
+	--bg-surface-hover-light: #dcdce2;
+	--bg-surface-hover-dark: #3a3a3c;
+
+	--border-subtle-light: rgba(0, 0, 0, 0.07);
+	--border-subtle-dark: rgba(255, 255, 255, 0.06);
+
+	--border-strong-light: rgba(0, 0, 0, 0.14);
+	--border-strong-dark: rgba(255, 255, 255, 0.12);
+
+	--text-primary-light: #1d1d1f;
+	--text-primary-dark: #f5f5f7;
+
+	--text-secondary-light: #424245;
+	--text-secondary-dark: #d1d1d6;
+
+	/* High-visibility muted text */
+	--text-muted-light: #6e6e73;
+	--text-muted-dark: #98989d;
+
+	/* Vivid TRON Electric Blue accent */
+	--accent-light: #007aff;
+	--accent-dark: #00d8ff;
+
+	/* High-contrast foreground text on solid accent backgrounds */
+	--accent-fg-light: #ffffff;
+	--accent-fg-dark: #06141a;
+
+	--accent-soft-light: rgba(0, 122, 255, 0.13);
+	--accent-soft-dark: rgba(0, 195, 255, 0.18);
+
+	--accent-glow-light: 0 0 0 3px rgba(0, 122, 255, 0.22);
+	--accent-glow-dark: 0 0 0 3px rgba(0, 216, 255, 0.26);
+
+	/* macOS 26 Concentric Radii (Solid Surfaces — No Liquid Glass) */
+	--radius-xs: 6px;
+	--radius-sm: 8px;
+	--radius-md: 10px;
+	--radius-lg: 14px;
+	--radius-xl: 18px;
+	--radius-pill: 9999px;
+
+	/* Subtle solid elevation shadows */
+	--shadow-card-light: 0 1px 2px rgba(0, 0, 0, 0.05);
+	--shadow-card-dark: 0 1px 2px rgba(0, 0, 0, 0.28);
+	--shadow-dialog-light: 0 22px 54px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.06);
+	--shadow-dialog-dark: 0 28px 72px rgba(0, 0, 0, 0.62), 0 2px 10px rgba(0, 0, 0, 0.35);
+
+	/* Monochrome Primary Action */
+	--btn-primary-bg-light: #1d1d1f;
+	--btn-primary-bg-dark: #f5f5f7;
+	--btn-primary-hover-light: #333336;
+	--btn-primary-hover-dark: #e2e2e7;
+	--btn-primary-text-light: #ffffff;
+	--btn-primary-text-dark: #161617;
+
+	/* Destructive Danger (Apple System Red) */
+	--danger-light: #d92d20;
+	--danger-dark: #ff453a;
+	--danger-soft-light: rgba(217, 45, 32, 0.1);
+	--danger-soft-dark: rgba(255, 69, 58, 0.16);
+
+	--success-light: #15803d;
+	--success-dark: #4ade80;
+
+	--warning-light: #b45309;
+	--warning-dark: #fbbf24;
+
+	--scrollbar-thumb-light: #bdbdb6;
+	--scrollbar-thumb-dark: #48484a;
+	--scrollbar-track-light: transparent;
+	--scrollbar-track-dark: transparent;
+
+	/* Fallback defaults (Light) */
+	--bg-app: var(--bg-app-light);
+	--bg-sidebar: var(--bg-sidebar-light);
+	--bg-surface: var(--bg-surface-light);
+	--bg-elevated: var(--bg-elevated-light);
+	--bg-surface-hover: var(--bg-surface-hover-light);
+	--border-subtle: var(--border-subtle-light);
+	--border-strong: var(--border-strong-light);
+	--text-primary: var(--text-primary-light);
+	--text-secondary: var(--text-secondary-light);
+	--text-muted: var(--text-muted-light);
+	--accent: var(--accent-light);
+	--accent-fg: var(--accent-fg-light);
+	--accent-soft: var(--accent-soft-light);
+	--accent-glow: var(--accent-glow-light);
+	--shadow-card: var(--shadow-card-light);
+	--shadow-dialog: var(--shadow-dialog-light);
+	--btn-primary-bg: var(--btn-primary-bg-light);
+	--btn-primary-hover: var(--btn-primary-hover-light);
+	--btn-primary-text: var(--btn-primary-text-light);
+	--danger: var(--danger-light);
+	--danger-soft: var(--danger-soft-light);
+	--success: var(--success-light);
+	--warning: var(--warning-light);
+	--scrollbar-thumb: var(--scrollbar-thumb-light);
+	--scrollbar-track: var(--scrollbar-track-light);
+
+	@media (prefers-color-scheme: dark) {
+		--bg-app: var(--bg-app-dark);
+		--bg-sidebar: var(--bg-sidebar-dark);
+		--bg-surface: var(--bg-surface-dark);
+		--bg-elevated: var(--bg-elevated-dark);
+		--bg-surface-hover: var(--bg-surface-hover-dark);
+		--border-subtle: var(--border-subtle-dark);
+		--border-strong: var(--border-strong-dark);
+		--text-primary: var(--text-primary-dark);
+		--text-secondary: var(--text-secondary-dark);
+		--text-muted: var(--text-muted-dark);
+		--accent: var(--accent-dark);
+		--accent-fg: var(--accent-fg-dark);
+		--accent-soft: var(--accent-soft-dark);
+		--accent-glow: var(--accent-glow-dark);
+		--shadow-card: var(--shadow-card-dark);
+		--shadow-dialog: var(--shadow-dialog-dark);
+		--btn-primary-bg: var(--btn-primary-bg-dark);
+		--btn-primary-hover: var(--btn-primary-hover-dark);
+		--btn-primary-text: var(--btn-primary-text-dark);
+		--danger: var(--danger-dark);
+		--danger-soft: var(--danger-soft-dark);
+		--success: var(--success-dark);
+		--warning: var(--warning-dark);
+		--scrollbar-thumb: var(--scrollbar-thumb-dark);
+		--scrollbar-track: var(--scrollbar-track-dark);
+	}
+
+	@supports (color: light-dark(white, black)) {
+		--bg-app: light-dark(var(--bg-app-light), var(--bg-app-dark));
+		--bg-sidebar: light-dark(var(--bg-sidebar-light), var(--bg-sidebar-dark));
+		--bg-surface: light-dark(var(--bg-surface-light), var(--bg-surface-dark));
+		--bg-elevated: light-dark(var(--bg-elevated-light), var(--bg-elevated-dark));
+		--bg-surface-hover: light-dark(var(--bg-surface-hover-light), var(--bg-surface-hover-dark));
+		--border-subtle: light-dark(var(--border-subtle-light), var(--border-subtle-dark));
+		--border-strong: light-dark(var(--border-strong-light), var(--border-strong-dark));
+		--text-primary: light-dark(var(--text-primary-light), var(--text-primary-dark));
+		--text-secondary: light-dark(var(--text-secondary-light), var(--text-secondary-dark));
+		--text-muted: light-dark(var(--text-muted-light), var(--text-muted-dark));
+		--accent: light-dark(var(--accent-light), var(--accent-dark));
+		--accent-fg: light-dark(var(--accent-fg-light), var(--accent-fg-dark));
+		--accent-soft: light-dark(var(--accent-soft-light), var(--accent-soft-dark));
+		--btn-primary-bg: light-dark(var(--btn-primary-bg-light), var(--btn-primary-bg-dark));
+		--btn-primary-hover: light-dark(var(--btn-primary-hover-light), var(--btn-primary-hover-dark));
+		--btn-primary-text: light-dark(var(--btn-primary-text-light), var(--btn-primary-text-dark));
+		--danger: light-dark(var(--danger-light), var(--danger-dark));
+		--danger-soft: light-dark(var(--danger-soft-light), var(--danger-soft-dark));
+		--success: light-dark(var(--success-light), var(--success-dark));
+		--warning: light-dark(var(--warning-light), var(--warning-dark));
+		--scrollbar-thumb: light-dark(var(--scrollbar-thumb-light), var(--scrollbar-thumb-dark));
+		--scrollbar-track: light-dark(var(--scrollbar-track-light), var(--scrollbar-track-dark));
+	}
+
+	color-scheme: light dark;
+	accent-color: var(--accent);
+	scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+:root[data-theme='light'] {
+	color-scheme: light;
+	--bg-app: var(--bg-app-light);
+	--bg-sidebar: var(--bg-sidebar-light);
+	--bg-surface: var(--bg-surface-light);
+	--bg-elevated: var(--bg-elevated-light);
+	--bg-surface-hover: var(--bg-surface-hover-light);
+	--border-subtle: var(--border-subtle-light);
+	--border-strong: var(--border-strong-light);
+	--text-primary: var(--text-primary-light);
+	--text-secondary: var(--text-secondary-light);
+	--text-muted: var(--text-muted-light);
+	--accent: var(--accent-light);
+	--accent-fg: var(--accent-fg-light);
+	--accent-soft: var(--accent-soft-light);
+	--accent-glow: var(--accent-glow-light);
+	--shadow-card: var(--shadow-card-light);
+	--shadow-dialog: var(--shadow-dialog-light);
+	--btn-primary-bg: var(--btn-primary-bg-light);
+	--btn-primary-hover: var(--btn-primary-hover-light);
+	--btn-primary-text: var(--btn-primary-text-light);
+	--danger: var(--danger-light);
+	--danger-soft: var(--danger-soft-light);
+	--success: var(--success-light);
+	--warning: var(--warning-light);
+	--scrollbar-thumb: var(--scrollbar-thumb-light);
+	--scrollbar-track: var(--scrollbar-track-light);
+}
+
+:root[data-theme='dark'] {
+	color-scheme: dark;
+	--bg-app: var(--bg-app-dark);
+	--bg-sidebar: var(--bg-sidebar-dark);
+	--bg-surface: var(--bg-surface-dark);
+	--bg-elevated: var(--bg-elevated-dark);
+	--bg-surface-hover: var(--bg-surface-hover-dark);
+	--border-subtle: var(--border-subtle-dark);
+	--border-strong: var(--border-strong-dark);
+	--text-primary: var(--text-primary-dark);
+	--text-secondary: var(--text-secondary-dark);
+	--text-muted: var(--text-muted-dark);
+	--accent: var(--accent-dark);
+	--accent-fg: var(--accent-fg-dark);
+	--accent-soft: var(--accent-soft-dark);
+	--accent-glow: var(--accent-glow-dark);
+	--shadow-card: var(--shadow-card-dark);
+	--shadow-dialog: var(--shadow-dialog-dark);
+	--btn-primary-bg: var(--btn-primary-bg-dark);
+	--btn-primary-hover: var(--btn-primary-hover-dark);
+	--btn-primary-text: var(--btn-primary-text-dark);
+	--danger: var(--danger-dark);
+	--danger-soft: var(--danger-soft-dark);
+	--success: var(--success-dark);
+	--warning: var(--warning-dark);
+	--scrollbar-thumb: var(--scrollbar-thumb-dark);
+	--scrollbar-track: var(--scrollbar-track-dark);
+}
+
+html {
+	margin: 0;
+	padding: 0;
+	height: 100%;
+	overflow: hidden;
+	font-size: 16px;
+}
+
+body {
+	margin: 0;
+	padding: 0;
+	height: 100%;
+	overflow: hidden;
+	background-color: var(--bg-app);
+	color: var(--text-primary);
+	font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+	font-size: 14px;
+	line-height: 1.5;
+	letter-spacing: -0.006em;
+	-webkit-font-smoothing: antialiased;
+	user-select: none;
+}
+
+code,
+pre,
+.font-mono {
+	font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Tailwind v4 divide-y / divide-x hairline fix */
+.divide-y > :not(:last-child),
+.divide-x > :not(:last-child) {
+	border-color: var(--border-subtle) !important;
+}
+
+/* macOS 26 concentric radii — tonal surface separation without heavy card borders */
+main :is(div, section, article, a)[style*='--bg-surface'].border {
+	border-radius: var(--radius-lg);
+	border-color: transparent !important;
+	box-shadow: var(--shadow-card);
+	overflow: hidden;
+}
+
+main :is(div, section, article, a)[style*='--bg-elevated'].border {
+	border-radius: var(--radius-sm);
+	border-color: transparent !important;
+}
+
+/* Sticky top headers across all pages — zero gap/bleed above header on WKWebView */
+main > div > header {
+	position: sticky;
+	top: 0;
+	z-index: 20;
+	background-color: var(--bg-app);
+	padding-top: 6px;
+	box-shadow: 0 -20px 0 0 var(--bg-app);
+}
+
+/* Fluid page width & responsive auto-fill card grids */
+main > div.max-w-6xl {
+	max-width: min(1680px, 100%) !important;
+	width: 100%;
+}
+
+.wb-grid-cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(min(275px, 100%), 1fr));
+	gap: 0.75rem;
+}
+
+.wb-grid-services {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr));
+	gap: 1rem;
+}
+
+.wb-grid-compact {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr));
+	gap: 0.75rem;
+}
+
+/* Uniform custom-chevron select & clean borderless Apple elevated inputs */
+input[type='text']:not(.wb-bare-input),
+input[type='search']:not(.wb-bare-input),
+input[type='number']:not(.wb-bare-input),
+input[type='password']:not(.wb-bare-input),
+select {
+	min-height: 36px;
+	font-size: 13.5px;
+	border-radius: var(--radius-md);
+	border: none !important;
+	background-color: var(--bg-elevated) !important;
+}
+
+.wb-bare-input,
+.wb-bare-input:focus,
+.wb-bare-input:focus-visible {
+	background-color: transparent !important;
+	border: none !important;
+	outline: none !important;
+	box-shadow: none !important;
+}
+
+select {
+	appearance: none;
+	-webkit-appearance: none;
+	padding-right: 28px !important;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238a8a9c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+	background-repeat: no-repeat;
+	background-position: right 9px center;
+	background-size: 12px 12px;
+	cursor: pointer;
+}
+
+select:hover:not(:disabled),
+input:hover:not(:disabled) {
+	border-color: var(--border-strong);
+}
+
+input::placeholder {
+	color: var(--text-muted);
+	opacity: 1;
+}
+
+/* macOS 26 capsule button primitives — borderless solid/tinted fills, no glass blur */
+.wb-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 7px;
+	min-height: 34px;
+	padding: 6px 14px;
+	font-size: 13px;
+	font-weight: 500;
+	border-radius: var(--radius-pill);
+	border: none;
+	background-color: var(--bg-elevated);
+	color: var(--text-primary);
+	cursor: pointer;
+}
+
+.wb-btn:hover:not(:disabled) {
+	background-color: var(--bg-surface-hover);
+}
+
+.wb-btn:active:not(:disabled) {
+	transform: scale(0.985);
+}
+
+.wb-btn:disabled {
+	opacity: 0.42;
+	cursor: not-allowed;
+}
+
+.wb-btn-primary {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 7px;
+	min-height: 34px;
+	padding: 6px 16px;
+	font-size: 13px;
+	font-weight: 600;
+	border-radius: var(--radius-pill);
+	border: none;
+	background-color: var(--btn-primary-bg);
+	color: var(--btn-primary-text);
+	cursor: pointer;
+}
+
+.wb-btn-primary:hover:not(:disabled) {
+	background-color: var(--btn-primary-hover);
+}
+
+.wb-btn-primary:active:not(:disabled) {
+	transform: scale(0.985);
+}
+
+.wb-btn-primary:disabled {
+	opacity: 0.42;
+	cursor: not-allowed;
+}
+
+.wb-btn-danger {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 7px;
+	min-height: 34px;
+	padding: 6px 14px;
+	font-size: 13px;
+	font-weight: 500;
+	border-radius: var(--radius-pill);
+	border: none;
+	background-color: var(--danger-soft);
+	color: var(--danger);
+	cursor: pointer;
+}
+
+.wb-btn-danger:hover:not(:disabled) {
+	background-color: var(--danger);
+	color: #ffffff;
+}
+
+.wb-btn-danger:active:not(:disabled) {
+	transform: scale(0.985);
+}
+
+.wb-btn-danger:disabled {
+	opacity: 0.38;
+	cursor: not-allowed;
+}
+
+/* High-contrast foreground on solid TRON Blue accent buttons & links */
+button[style*='background-color: var(--accent)'],
+a[style*='background-color: var(--accent)'] {
+	color: var(--accent-fg) !important;
+	border-radius: var(--radius-pill);
+	font-weight: 600;
+}
+
+button,
+a,
+select,
+input {
+	transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease, transform 90ms ease;
+}
+
+input:focus-visible,
+select:focus-visible,
+button:focus-visible,
+a:focus-visible {
+	outline: 1.5px solid var(--accent);
+	outline-offset: 1px;
+	box-shadow: var(--accent-glow);
+}
+
+.selectable {
+	user-select: text;
+}
+
+.wb-kicker {
+	font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--text-muted);
+}
+
+/* Native macOS 26 modal dialog — generous radius, solid surface, no blur */
+dialog:modal {
+	margin: auto;
+	overscroll-behavior: contain;
+	background-color: var(--bg-surface);
+	color: var(--text-primary);
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-xl);
+	overflow: hidden;
+	padding: 0;
+	max-width: 500px;
+	width: calc(100vw - 32px);
+	max-height: calc(100vh - 64px);
+	box-shadow: var(--shadow-dialog);
+}
+
+dialog::backdrop {
+	overflow: hidden;
+	overscroll-behavior: contain;
+	background: rgba(0, 0, 0, 0.46);
+}
+
+dialog[open] {
+	display: flex;
+	flex-direction: column;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	dialog[open] {
+		transition: opacity 140ms cubic-bezier(0.16, 1, 0.3, 1), transform 140ms cubic-bezier(0.16, 1, 0.3, 1);
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
+
+	@starting-style {
+		dialog[open] {
+			opacity: 0;
+			transform: translateY(6px) scale(0.985);
+		}
+	}
+}
+
+/* Titlebar drag region */
+[data-tauri-drag-region] {
+	-webkit-app-region: drag;
+}
+
+[data-tauri-drag-region] button,
+[data-tauri-drag-region] input,
+[data-tauri-drag-region] a {
+	-webkit-app-region: no-drag;
+}
