@@ -4,23 +4,23 @@
     {
       "id": "caddy",
       "name": "Caddy",
-      "version": "2.9.1",
+      "version": "2.11.9",
       "description": "Modern web server with automatic local HTTPS & reverse proxy",
       "default_port": 8080,
       "size_hint_mb": 16,
       "targets": {
         "macos-aarch64": {
-          "url": "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_mac_arm64.tar.gz",
+          "url": "https://github.com/caddyserver/caddy/releases/download/v2.11.9/caddy_2.11.9_mac_arm64.tar.gz",
           "format": "tar.gz",
           "strip_components": 0
         },
         "linux-x86_64": {
-          "url": "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_linux_amd64.tar.gz",
+          "url": "https://github.com/caddyserver/caddy/releases/download/v2.11.9/caddy_2.11.9_linux_amd64.tar.gz",
           "format": "tar.gz",
           "strip_components": 0
         },
         "windows-x86_64": {
-          "url": "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_windows_amd64.zip",
+          "url": "https://github.com/caddyserver/caddy/releases/download/v2.11.9/caddy_2.11.9_windows_amd64.zip",
           "format": "zip",
           "strip_components": 0
         }
@@ -29,23 +29,23 @@
     {
       "id": "phpmyadmin",
       "name": "phpMyAdmin",
-      "version": "5.2.2",
+      "version": "5.2.3",
       "description": "Web administration interface for all running MariaDB instances",
       "default_port": 8088,
       "size_hint_mb": 14,
       "targets": {
         "macos-aarch64": {
-          "url": "https://files.phpmyadmin.net/phpMyAdmin/5.2.2/phpMyAdmin-5.2.2-all-languages.zip",
+          "url": "https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-all-languages.zip",
           "format": "zip",
           "strip_components": 1
         },
         "linux-x86_64": {
-          "url": "https://files.phpmyadmin.net/phpMyAdmin/5.2.2/phpMyAdmin-5.2.2-all-languages.zip",
+          "url": "https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-all-languages.zip",
           "format": "zip",
           "strip_components": 1
         },
         "windows-x86_64": {
-          "url": "https://files.phpmyadmin.net/phpMyAdmin/5.2.2/phpMyAdmin-5.2.2-all-languages.zip",
+          "url": "https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-all-languages.zip",
           "format": "zip",
           "strip_components": 1
         }
@@ -54,18 +54,18 @@
     {
       "id": "mariadb",
       "name": "MariaDB",
-      "version": "11.4.4",
-      "description": "MariaDB 11.4 LTS with isolated per-version data directory",
+      "version": "12.3.4",
+      "description": "MariaDB 12.3 LTS with isolated per-version data directory",
       "default_port": 3306,
       "size_hint_mb": 120,
       "targets": {
         "linux-x86_64": {
-          "url": "https://archive.mariadb.org/mariadb-11.4.4/bintar-linux-systemd-x86_64/mariadb-11.4.4-linux-systemd-x86_64.tar.gz",
+          "url": "https://archive.mariadb.org/mariadb-12.3.4/bintar-linux-systemd-x86_64/mariadb-12.3.4-linux-systemd-x86_64.tar.gz",
           "format": "tar.gz",
           "strip_components": 1
         },
         "windows-x86_64": {
-          "url": "https://archive.mariadb.org/mariadb-11.4.4/winx64-packages/mariadb-11.4.4-winx64.zip",
+          "url": "https://archive.mariadb.org/mariadb-12.3.4/winx64-packages/mariadb-12.3.4-winx64.zip",
           "format": "zip",
           "strip_components": 1
         }
@@ -74,7 +74,7 @@
     {
       "id": "redis",
       "name": "Redis",
-      "version": "7.4.2",
+      "version": "8.2.11",
       "description": "In-memory cache & queue broker for Laravel Horizon / queues",
       "default_port": 6379,
       "size_hint_mb": 8,
@@ -89,7 +89,7 @@
     {
       "id": "apache",
       "name": "Apache HTTP",
-      "version": "2.4.63",
+      "version": "2.4.71",
       "description": "Apache HTTP Server with full .htaccess support for PHP/Laravel apps",
       "default_port": 8081,
       "size_hint_mb": 18,
