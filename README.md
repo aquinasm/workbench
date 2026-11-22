@@ -53,6 +53,22 @@ Workbench is a cross-platform local development environment built with Tauri v2,
 | Linux (64-bit) | `x86_64-unknown-linux-gnu` (`.deb`, `.rpm`, `.AppImage`) |
 | Windows (64-bit) | `x86_64-pc-windows-msvc` (`.exe`, `.msi`) |
 
+### Quick Install on macOS
+
+Because Public Beta builds are ad-hoc signed rather than Apple Developer ID notarized, macOS Gatekeeper may flag browser-downloaded `.dmg` files as *"damaged and can't be opened"*.
+
+**Option 1 — One-line terminal installer (recommended, bypasses browser quarantine):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aquinasm/workbench/main/install.sh | sh
+```
+
+**Option 2 — After dragging `Workbench.app` from the `.dmg` to `/Applications`:**
+
+```bash
+xattr -cr /Applications/Workbench.app
+```
+
 ## Getting Started
 
 ### Prerequisites
