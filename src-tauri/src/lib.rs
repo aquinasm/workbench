@@ -2,6 +2,7 @@ pub mod commands;
 pub mod config;
 pub mod databases;
 pub mod db;
+pub mod prebuilt;
 pub mod runtimes;
 pub mod services;
 pub mod shell;

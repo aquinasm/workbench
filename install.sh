@@ -14,11 +14,11 @@ if [ -z "$TAG" ]; then
 fi
 
 if [ "$OS" = "Darwin" ]; then
-  if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
-    ASSET="Workbench_aarch64.app.tar.gz"
-  else
-    ASSET="Workbench_x64.app.tar.gz"
+  if [ "$ARCH" != "arm64" ] && [ "$ARCH" != "aarch64" ]; then
+    echo "Error: Workbench on macOS requires Apple Silicon (arm64)." >&2
+    exit 1
   fi
+  ASSET="Workbench_aarch64.app.tar.gz"
   URL="https://github.com/${REPO}/releases/download/${TAG}/${ASSET}"
   TMP_DIR="$(mktemp -d)"
   trap 'rm -rf "$TMP_DIR"' EXIT

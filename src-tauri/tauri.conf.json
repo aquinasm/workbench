@@ -28,7 +28,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["dmg", "app", "deb", "rpm", "appimage", "msi"],
     "macOS": {
       "minimumSystemVersion": "11.0"
     },

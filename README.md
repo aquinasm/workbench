@@ -49,9 +49,8 @@ Workbench is a cross-platform local development environment built with Tauri v2,
 | Platform | Target |
 | :--- | :--- |
 | macOS (Apple Silicon) | `aarch64-apple-darwin` (`.dmg`, `.app`) |
-| macOS (Intel) | `x86_64-apple-darwin` (`.dmg`, `.app`) |
 | Linux (64-bit) | `x86_64-unknown-linux-gnu` (`.deb`, `.rpm`, `.AppImage`) |
-| Windows (64-bit) | `x86_64-pc-windows-msvc` (`.exe`, `.msi`) |
+| Windows (64-bit) | `x86_64-pc-windows-msvc` (`.msi`) |
 
 ### Quick Install on macOS
 

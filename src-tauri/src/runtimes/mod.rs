@@ -570,130 +570,188 @@ pub async fn install_runtime(
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
-    let resp = client
-        .get(&target.url)
-        .send()
-        .await
-        .map_err(|e| format!("Download failed for {}: {}", target.url, e))?;
-
-    if !resp.status().is_success() {
-        let _ = fs::remove_dir_all(&staging_dir);
-        return Err(format!(
-            "Download returned HTTP {} for {}",
-            resp.status(),
-            target.url
-        ));
-    }
-
-    let total_bytes = resp.content_length().unwrap_or(0);
-    let archive_name = target
-        .filename
-        .clone()
-        .unwrap_or_else(|| format!("download.{}", target.format));
-    let archive_path = staging_dir.join(&archive_name);
-
-    let mut file = File::create(&archive_path)
-        .map_err(|e| format!("Failed creating temp file: {}", e))?;
-    let mut stream = resp.bytes_stream();
-    let mut hasher = Sha256::new();
-    let mut downloaded: u64 = 0;
-    let mut last_percent: u8 = 0;
-
-    while let Some(chunk_res) = stream.next().await {
-        let chunk = chunk_res.map_err(|e| format!("Stream read error: {}", e))?;
-        hasher.update(&chunk);
-        file.write_all(&chunk)
-            .map_err(|e| format!("Disk write error: {}", e))?;
-        downloaded += chunk.len() as u64;
-
-        let pct = downloaded
-            .saturating_mul(100)
-            .checked_div(total_bytes)
-            .map(|p| p.min(99) as u8)
-            .unwrap_or(50);
-        if pct >= last_percent + 2 || downloaded == total_bytes {
-            last_percent = pct;
-            let _ = app.emit(
-                "runtime-progress",
-                RuntimeProgressEvent {
-                    tool: tool.to_string(),
-                    version: version.to_string(),
-                    stage: "downloading".to_string(),
-                    percent: pct,
-                    downloaded_bytes: downloaded,
-                    total_bytes,
-                },
-            );
-        }
-    }
-    drop(file);
-
-    if let Some(expected_sha) = target
-        .sha256
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        let actual_sha: String = hasher
-            .finalize()
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect();
-        if !actual_sha.eq_ignore_ascii_case(expected_sha) {
-            let _ = fs::remove_dir_all(&staging_dir);
-            return Err(format!(
-                "SHA-256 checksum mismatch for {} {} (expected {}, got {})",
-                tool, version, expected_sha, actual_sha
-            ));
-        }
-    }
-
-    let _ = app.emit(
-        "runtime-progress",
-        RuntimeProgressEvent {
-            tool: tool.to_string(),
-            version: version.to_string(),
-            stage: "extracting".to_string(),
-            percent: 99,
-            downloaded_bytes: downloaded,
-            total_bytes,
-        },
-    );
-
     let extract_dir = staging_dir.join("extracted");
     fs::create_dir_all(&extract_dir)
         .map_err(|e| format!("Failed creating extract dir: {}", e))?;
 
-    let fmt = target.format.clone();
-    let strip = target.strip_components;
-    let archive_clone = archive_path.clone();
-    let extract_clone = extract_dir.clone();
-    let raw_filename = target.filename.clone();
+    let mut downloaded: u64 = 0;
+    let mut total_bytes: u64 = 0;
 
-    tokio::task::spawn_blocking(move || -> Result<(), String> {
-        match fmt.as_str() {
-            "tar.gz" => {
-                let f = File::open(&archive_clone)
-                    .map_err(|e| format!("Failed opening archive: {}", e))?;
-                extract_tar(GzDecoder::new(f), &extract_clone, strip)
-            }
-            "tar.xz" => {
-                let f = File::open(&archive_clone)
-                    .map_err(|e| format!("Failed opening archive: {}", e))?;
-                extract_tar(XzDecoder::new(f), &extract_clone, strip)
-            }
-            "zip" => extract_zip(&archive_clone, &extract_clone, strip),
-            "raw" => {
-                let target_name = raw_filename.unwrap_or_else(|| "binary".to_string());
-                fs::copy(&archive_clone, extract_clone.join(target_name))
-                    .map_err(|e| format!("Failed copying binary: {}", e))?;
-                Ok(())
-            }
-            other => Err(format!("Unsupported archive format: {}", other)),
+    if target.format == "homebrew-bottle" {
+        let mut last_percent = 0u8;
+        let res = crate::prebuilt::install_homebrew_bottle_tree(
+            &client,
+            &target.url,
+            platform,
+            &staging_dir,
+            &extract_dir,
+            |pct, dl, tot| {
+                downloaded = dl;
+                total_bytes = tot;
+                if pct >= last_percent + 2 || pct >= 95 {
+                    last_percent = pct;
+                    let _ = app.emit(
+                        "runtime-progress",
+                        RuntimeProgressEvent {
+                            tool: tool.to_string(),
+                            version: version.to_string(),
+                            stage: if pct >= 96 {
+                                "extracting".to_string()
+                            } else {
+                                "downloading".to_string()
+                            },
+                            percent: pct,
+                            downloaded_bytes: dl,
+                            total_bytes: tot,
+                        },
+                    );
+                }
+            },
+        )
+        .await;
+
+        if let Err(e) = res {
+            let _ = fs::remove_dir_all(&staging_dir);
+            return Err(e);
         }
-    })
-    .await
-    .map_err(|e| format!("Extraction task failed: {}", e))??;
+    } else {
+        // Resolve live PHP archive URLs dynamically so point-release lag or Windows archive moves never 404
+        let resolved_url = if tool == "php" && target.url.contains("dl.static-php.dev") {
+            match crate::prebuilt::resolve_static_php_url(&client, &target.url, version, platform)
+                .await
+            {
+                Ok(u) => u,
+                Err(e) => {
+                    let _ = fs::remove_dir_all(&staging_dir);
+                    return Err(e);
+                }
+            }
+        } else if tool == "php" && target.url.contains("windows.php.net") {
+            crate::prebuilt::resolve_windows_php_url(&client, &target.url).await
+        } else {
+            target.url.clone()
+        };
+
+        let resp = client
+            .get(&resolved_url)
+            .send()
+            .await
+            .map_err(|e| format!("Download failed for {}: {}", resolved_url, e))?;
+
+        if !resp.status().is_success() {
+            let _ = fs::remove_dir_all(&staging_dir);
+            return Err(format!(
+                "Download returned HTTP {} for {}",
+                resp.status(),
+                resolved_url
+            ));
+        }
+
+        total_bytes = resp.content_length().unwrap_or(0);
+        let archive_name = target
+            .filename
+            .clone()
+            .unwrap_or_else(|| format!("download.{}", target.format));
+        let archive_path = staging_dir.join(&archive_name);
+
+        let mut file = File::create(&archive_path)
+            .map_err(|e| format!("Failed creating temp file: {}", e))?;
+        let mut stream = resp.bytes_stream();
+        let mut hasher = Sha256::new();
+        let mut last_percent: u8 = 0;
+
+        while let Some(chunk_res) = stream.next().await {
+            let chunk = chunk_res.map_err(|e| format!("Stream read error: {}", e))?;
+            hasher.update(&chunk);
+            file.write_all(&chunk)
+                .map_err(|e| format!("Disk write error: {}", e))?;
+            downloaded += chunk.len() as u64;
+
+            let pct = downloaded
+                .saturating_mul(100)
+                .checked_div(total_bytes)
+                .map(|p| p.min(99) as u8)
+                .unwrap_or(50);
+            if pct >= last_percent + 2 || downloaded == total_bytes {
+                last_percent = pct;
+                let _ = app.emit(
+                    "runtime-progress",
+                    RuntimeProgressEvent {
+                        tool: tool.to_string(),
+                        version: version.to_string(),
+                        stage: "downloading".to_string(),
+                        percent: pct,
+                        downloaded_bytes: downloaded,
+                        total_bytes,
+                    },
+                );
+            }
+        }
+        drop(file);
+
+        if let Some(expected_sha) = target
+            .sha256
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let actual_sha: String = hasher
+                .finalize()
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect();
+            if !actual_sha.eq_ignore_ascii_case(expected_sha) {
+                let _ = fs::remove_dir_all(&staging_dir);
+                return Err(format!(
+                    "SHA-256 checksum mismatch for {} {} (expected {}, got {})",
+                    tool, version, expected_sha, actual_sha
+                ));
+            }
+        }
+
+        let _ = app.emit(
+            "runtime-progress",
+            RuntimeProgressEvent {
+                tool: tool.to_string(),
+                version: version.to_string(),
+                stage: "extracting".to_string(),
+                percent: 99,
+                downloaded_bytes: downloaded,
+                total_bytes,
+            },
+        );
+
+        let fmt = target.format.clone();
+        let strip = target.strip_components;
+        let archive_clone = archive_path.clone();
+        let extract_clone = extract_dir.clone();
+        let raw_filename = target.filename.clone();
+
+        tokio::task::spawn_blocking(move || -> Result<(), String> {
+            match fmt.as_str() {
+                "tar.gz" => {
+                    let f = File::open(&archive_clone)
+                        .map_err(|e| format!("Failed opening archive: {}", e))?;
+                    extract_tar(GzDecoder::new(f), &extract_clone, strip)
+                }
+                "tar.xz" => {
+                    let f = File::open(&archive_clone)
+                        .map_err(|e| format!("Failed opening archive: {}", e))?;
+                    extract_tar(XzDecoder::new(f), &extract_clone, strip)
+                }
+                "zip" => extract_zip(&archive_clone, &extract_clone, strip),
+                "raw" => {
+                    let target_name = raw_filename.unwrap_or_else(|| "binary".to_string());
+                    fs::copy(&archive_clone, extract_clone.join(target_name))
+                        .map_err(|e| format!("Failed copying binary: {}", e))?;
+                    Ok(())
+                }
+                other => Err(format!("Unsupported archive format: {}", other)),
+            }
+        })
+        .await
+        .map_err(|e| format!("Extraction task failed: {}", e))??;
+    }
 
     #[cfg(unix)]
     ensure_executable_bins(&extract_dir);
@@ -841,7 +899,7 @@ pub fn sync_shims() -> Result<ShimSyncReport, String> {
     let sdir = shims_dir();
     fs::create_dir_all(&sdir).map_err(|e| format!("Failed creating shims dir: {}", e))?;
 
-    let shim_names = ["php", "composer", "node", "npm", "npx", "flutter", "dart"];
+    let shim_names = ["php", "composer", "node", "npm", "npx", "corepack", "flutter", "dart"];
     let mut created = Vec::new();
 
     if let Some(shim_bin) = locate_shim_binary() {
@@ -892,7 +950,7 @@ pub fn sync_shims() -> Result<ShimSyncReport, String> {
         let tool = match name {
             "php" => "php",
             "composer" => "composer",
-            "node" | "npm" | "npx" => "node",
+            "node" | "npm" | "npx" | "corepack" => "node",
             "flutter" | "dart" => "flutter",
             _ => continue,
         };

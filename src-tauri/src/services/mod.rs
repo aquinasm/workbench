@@ -261,8 +261,10 @@ fn managed_binary_for_service(id: &str, version: &str) -> Option<PathBuf> {
         ],
         "mariadb" => vec![
             base.join("bin/mariadbd"),
+            base.join("sbin/mariadbd"),
             base.join("bin/mariadbd.exe"),
             base.join("bin/mysqld"),
+            base.join("sbin/mysqld"),
             base.join("bin/mysqld.exe"),
         ],
         "redis" => vec![
@@ -272,6 +274,7 @@ fn managed_binary_for_service(id: &str, version: &str) -> Option<PathBuf> {
         ],
         "apache" => vec![
             base.join("bin/httpd"),
+            base.join("sbin/httpd"),
             base.join("bin/httpd.exe"),
         ],
         "phpmyadmin" => vec![base.join("index.php")],
@@ -497,194 +500,239 @@ pub async fn install_service(app: &AppHandle, service_id: &str) -> Result<(), St
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
-    let resp = client
-        .get(&target.url)
-        .send()
-        .await
-        .map_err(|e| format!("Download failed: {}", e))?;
-
-    if !resp.status().is_success() {
-        let _ = fs::remove_dir_all(&staging);
-        return Err(format!("Download returned HTTP {}", resp.status()));
-    }
-
-    let total = resp.content_length().unwrap_or(0);
-    let archive_path = staging.join(format!("download.{}", target.format));
-    let mut file = File::create(&archive_path).map_err(|e| format!("Temp file error: {}", e))?;
-    let mut stream = resp.bytes_stream();
-    let mut hasher = Sha256::new();
-    let mut downloaded = 0u64;
-    let mut last_pct = 0u8;
-
-    while let Some(chunk_res) = stream.next().await {
-        let chunk = chunk_res.map_err(|e| format!("Stream error: {}", e))?;
-        hasher.update(&chunk);
-        file.write_all(&chunk)
-            .map_err(|e| format!("Write error: {}", e))?;
-        downloaded += chunk.len() as u64;
-        let pct = downloaded
-            .saturating_mul(100)
-            .checked_div(total)
-            .map(|p| p.min(99) as u8)
-            .unwrap_or(50);
-        if pct >= last_pct + 3 || downloaded == total {
-            last_pct = pct;
-            let _ = app.emit(
-                "service-progress",
-                ServiceProgressEvent {
-                    service_id: service_id.to_string(),
-                    stage: "downloading".to_string(),
-                    percent: pct,
-                },
-            );
-        }
-    }
-    drop(file);
-
-    if let Some(expected_sha) = target
-        .sha256
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        let actual_sha: String = hasher
-            .finalize()
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect();
-        if !actual_sha.eq_ignore_ascii_case(expected_sha) {
-            let _ = fs::remove_dir_all(&staging);
-            return Err(format!(
-                "SHA-256 checksum mismatch for {} (expected {}, got {})",
-                svc.name, expected_sha, actual_sha
-            ));
-        }
-    }
-
-    let _ = app.emit(
-        "service-progress",
-        ServiceProgressEvent {
-            service_id: service_id.to_string(),
-            stage: "extracting".to_string(),
-            percent: 99,
-        },
-    );
-
     let extract_dir = staging.join("extracted");
     fs::create_dir_all(&extract_dir).map_err(|e| format!("Extract dir error: {}", e))?;
 
-    let fmt = target.format.clone();
-    let strip = target.strip_components;
-    let ap = archive_path.clone();
-    let ed = extract_dir.clone();
-
-    tokio::task::spawn_blocking(move || -> Result<(), String> {
-        if fmt == "tar.gz" {
-            let f = File::open(&ap).map_err(|e| format!("Open tar.gz error: {}", e))?;
-            let mut archive = Archive::new(GzDecoder::new(f));
-            for entry_res in archive
-                .entries()
-                .map_err(|e| format!("Tar entries error: {}", e))?
-            {
-                let mut entry = entry_res.map_err(|e| format!("Tar entry error: {}", e))?;
-                let entry_type = entry.header().entry_type();
-                if entry_type.is_character_special()
-                    || entry_type.is_block_special()
-                    || entry_type.is_fifo()
-                {
-                    continue;
+    if target.format == "homebrew-bottle" {
+        let mut last_pct = 0u8;
+        let res = crate::prebuilt::install_homebrew_bottle_tree(
+            &client,
+            &target.url,
+            platform,
+            &staging,
+            &extract_dir,
+            |pct, _, _| {
+                if pct >= last_pct + 2 || pct >= 95 {
+                    last_pct = pct;
+                    let _ = app.emit(
+                        "service-progress",
+                        ServiceProgressEvent {
+                            service_id: service_id.to_string(),
+                            stage: if pct >= 96 {
+                                "extracting".to_string()
+                            } else {
+                                "downloading".to_string()
+                            },
+                            percent: pct,
+                        },
+                    );
                 }
-                let raw = entry
-                    .path()
-                    .map_err(|e| format!("Tar path error: {}", e))?
-                    .into_owned();
-                let Some(rel) = sanitize_rel_path(&raw, strip) else {
-                    continue;
-                };
-                if entry_type.is_symlink() || entry_type.is_hard_link() {
-                    let link_name = entry
-                        .link_name()
-                        .map_err(|e| format!("Invalid tar link target: {}", e))?;
-                    let Some(link_target) = link_name else {
+            },
+        )
+        .await;
+
+        if let Err(e) = res {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(e);
+        }
+    } else {
+        let resp = client
+            .get(&target.url)
+            .send()
+            .await
+            .map_err(|e| format!("Download failed: {}", e))?;
+
+        if !resp.status().is_success() {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(format!("Download returned HTTP {}", resp.status()));
+        }
+
+        let total = resp.content_length().unwrap_or(0);
+        let archive_path = staging.join(format!("download.{}", target.format));
+        let mut file =
+            File::create(&archive_path).map_err(|e| format!("Temp file error: {}", e))?;
+        let mut stream = resp.bytes_stream();
+        let mut hasher = Sha256::new();
+        let mut downloaded = 0u64;
+        let mut last_pct = 0u8;
+
+        while let Some(chunk_res) = stream.next().await {
+            let chunk = chunk_res.map_err(|e| format!("Stream error: {}", e))?;
+            hasher.update(&chunk);
+            file.write_all(&chunk)
+                .map_err(|e| format!("Write error: {}", e))?;
+            downloaded += chunk.len() as u64;
+            let pct = downloaded
+                .saturating_mul(100)
+                .checked_div(total)
+                .map(|p| p.min(99) as u8)
+                .unwrap_or(50);
+            if pct >= last_pct + 3 || downloaded == total {
+                last_pct = pct;
+                let _ = app.emit(
+                    "service-progress",
+                    ServiceProgressEvent {
+                        service_id: service_id.to_string(),
+                        stage: "downloading".to_string(),
+                        percent: pct,
+                    },
+                );
+            }
+        }
+        drop(file);
+
+        if let Some(expected_sha) = target
+            .sha256
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let actual_sha: String = hasher
+                .finalize()
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect();
+            if !actual_sha.eq_ignore_ascii_case(expected_sha) {
+                let _ = fs::remove_dir_all(&staging);
+                return Err(format!(
+                    "SHA-256 checksum mismatch for {} (expected {}, got {})",
+                    svc.name, expected_sha, actual_sha
+                ));
+            }
+        }
+
+        let _ = app.emit(
+            "service-progress",
+            ServiceProgressEvent {
+                service_id: service_id.to_string(),
+                stage: "extracting".to_string(),
+                percent: 99,
+            },
+        );
+
+        let fmt = target.format.clone();
+        let strip = target.strip_components;
+        let ap = archive_path.clone();
+        let ed = extract_dir.clone();
+
+        tokio::task::spawn_blocking(move || -> Result<(), String> {
+            if fmt == "tar.gz" {
+                let f = File::open(&ap).map_err(|e| format!("Open tar.gz error: {}", e))?;
+                let mut archive = Archive::new(GzDecoder::new(f));
+                for entry_res in archive
+                    .entries()
+                    .map_err(|e| format!("Tar entries error: {}", e))?
+                {
+                    let mut entry = entry_res.map_err(|e| format!("Tar entry error: {}", e))?;
+                    let entry_type = entry.header().entry_type();
+                    if entry_type.is_character_special()
+                        || entry_type.is_block_special()
+                        || entry_type.is_fifo()
+                    {
+                        continue;
+                    }
+                    let raw = entry
+                        .path()
+                        .map_err(|e| format!("Tar path error: {}", e))?
+                        .into_owned();
+                    let Some(rel) = sanitize_rel_path(&raw, strip) else {
                         continue;
                     };
-                    if !link_target_stays_within_dest(&link_target, &rel, entry_type.is_hard_link()) {
-                        return Err(format!(
-                            "Blocked unsafe tar link escaping archive root: {} -> {}",
-                            rel.display(),
-                            link_target.display()
-                        ));
+                    if entry_type.is_symlink() || entry_type.is_hard_link() {
+                        let link_name = entry
+                            .link_name()
+                            .map_err(|e| format!("Invalid tar link target: {}", e))?;
+                        let Some(link_target) = link_name else {
+                            continue;
+                        };
+                        if !link_target_stays_within_dest(
+                            &link_target,
+                            &rel,
+                            entry_type.is_hard_link(),
+                        ) {
+                            return Err(format!(
+                                "Blocked unsafe tar link escaping archive root: {} -> {}",
+                                rel.display(),
+                                link_target.display()
+                            ));
+                        }
                     }
-                }
-                if let Some(parent_rel) = rel.parent() {
-                    if has_symlink_ancestor(&ed, parent_rel) {
-                        return Err(format!(
-                            "Blocked tar extraction through symlinked parent directory: {}",
-                            rel.display()
-                        ));
+                    if let Some(parent_rel) = rel.parent() {
+                        if has_symlink_ancestor(&ed, parent_rel) {
+                            return Err(format!(
+                                "Blocked tar extraction through symlinked parent directory: {}",
+                                rel.display()
+                            ));
+                        }
                     }
-                }
-                let out = ed.join(&rel);
-                if let Some(p) = out.parent() {
-                    fs::create_dir_all(p).map_err(|e| format!("Mkdir error: {}", e))?;
-                }
-                entry
-                    .unpack(&out)
-                    .map_err(|e| format!("Unpack error: {}", e))?;
-            }
-            Ok(())
-        } else if fmt == "zip" {
-            let f = File::open(&ap).map_err(|e| format!("Open zip error: {}", e))?;
-            let mut zip = zip::ZipArchive::new(f).map_err(|e| format!("Zip read error: {}", e))?;
-            for i in 0..zip.len() {
-                let mut item = zip.by_index(i).map_err(|e| format!("Zip item error: {}", e))?;
-                // Skip symlink entries in zip archives
-                if let Some(mode) = item.unix_mode() {
-                    if (mode & 0o170000) == 0o120000 {
-                        continue;
-                    }
-                }
-                let Some(enclosed) = item.enclosed_name().map(|p| p.to_path_buf()) else {
-                    continue;
-                };
-                let Some(rel) = sanitize_rel_path(&enclosed, strip) else {
-                    continue;
-                };
-                if let Some(parent_rel) = rel.parent() {
-                    if has_symlink_ancestor(&ed, parent_rel) {
-                        return Err(format!(
-                            "Blocked zip extraction through symlinked parent directory: {}",
-                            rel.display()
-                        ));
-                    }
-                }
-                let out = ed.join(&rel);
-                if item.is_dir() {
-                    fs::create_dir_all(&out).map_err(|e| format!("Mkdir error: {}", e))?;
-                } else {
+                    let out = ed.join(&rel);
                     if let Some(p) = out.parent() {
                         fs::create_dir_all(p).map_err(|e| format!("Mkdir error: {}", e))?;
                     }
-                    let mut out_f = File::create(&out).map_err(|e| format!("Create error: {}", e))?;
-                    std::io::copy(&mut item, &mut out_f)
-                        .map_err(|e| format!("Copy error: {}", e))?;
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-                        if let Some(mode) = item.unix_mode() {
-                            let safe_mode = mode & 0o755;
-                            let _ = fs::set_permissions(&out, fs::Permissions::from_mode(safe_mode));
+                    entry
+                        .unpack(&out)
+                        .map_err(|e| format!("Unpack error: {}", e))?;
+                }
+                Ok(())
+            } else if fmt == "zip" {
+                let f = File::open(&ap).map_err(|e| format!("Open zip error: {}", e))?;
+                let mut zip =
+                    zip::ZipArchive::new(f).map_err(|e| format!("Zip read error: {}", e))?;
+                for i in 0..zip.len() {
+                    let mut item = zip
+                        .by_index(i)
+                        .map_err(|e| format!("Zip item error: {}", e))?;
+                    if let Some(mode) = item.unix_mode() {
+                        if (mode & 0o170000) == 0o120000 {
+                            continue;
+                        }
+                    }
+                    let Some(enclosed) = item.enclosed_name().map(|p| p.to_path_buf()) else {
+                        continue;
+                    };
+                    let Some(rel) = sanitize_rel_path(&enclosed, strip) else {
+                        continue;
+                    };
+                    if let Some(parent_rel) = rel.parent() {
+                        if has_symlink_ancestor(&ed, parent_rel) {
+                            return Err(format!(
+                                "Blocked zip extraction through symlinked parent directory: {}",
+                                rel.display()
+                            ));
+                        }
+                    }
+                    let out = ed.join(&rel);
+                    if item.is_dir() {
+                        fs::create_dir_all(&out).map_err(|e| format!("Mkdir error: {}", e))?;
+                    } else {
+                        if let Some(p) = out.parent() {
+                            fs::create_dir_all(p).map_err(|e| format!("Mkdir error: {}", e))?;
+                        }
+                        let mut out_f =
+                            File::create(&out).map_err(|e| format!("Create error: {}", e))?;
+                        std::io::copy(&mut item, &mut out_f)
+                            .map_err(|e| format!("Copy error: {}", e))?;
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            if let Some(mode) = item.unix_mode() {
+                                let safe_mode = mode & 0o755;
+                                let _ = fs::set_permissions(
+                                    &out,
+                                    fs::Permissions::from_mode(safe_mode),
+                                );
+                            }
                         }
                     }
                 }
+                Ok(())
+            } else {
+                Err(format!("Unsupported service archive format: {}", fmt))
             }
-            Ok(())
-        } else {
-            Err(format!("Unsupported service archive format: {}", fmt))
-        }
-    })
-    .await
-    .map_err(|e| format!("Extract task error: {}", e))??;
+        })
+        .await
+        .map_err(|e| format!("Extract task error: {}", e))??;
+    }
 
     #[cfg(unix)]
     {

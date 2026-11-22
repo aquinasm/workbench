@@ -22,9 +22,9 @@
 
 	const tabs: { key: TabKey; label: string }[] = [
 		{ key: 'php', label: 'PHP' },
-		{ key: 'node', label: 'Node.js' },
+		{ key: 'node', label: 'Node.js & npm' },
 		{ key: 'composer', label: 'Composer' },
-		{ key: 'flutter', label: 'Flutter' },
+		{ key: 'flutter', label: 'Flutter & Dart' },
 		{ key: 'rust', label: 'Rust (rustup)' }
 	];
 
@@ -487,7 +487,14 @@
 										<span class="selectable truncate font-mono">{rt.install_path}</span>
 									{/if}
 								{:else}
-									<span>Download ~{rt.size_hint_mb} MB · Channel: {rt.channel}</span>
+									<span>
+										Download ~{rt.size_hint_mb} MB · Channel: {rt.channel}
+										{#if rt.tool === 'node'}
+											· Includes <code class="font-mono">npm</code>, <code class="font-mono">npx</code> & <code class="font-mono">corepack</code>
+										{:else if rt.tool === 'flutter'}
+											· Includes <code class="font-mono">flutter</code> & <code class="font-mono">dart</code>
+										{/if}
+									</span>
 								{/if}
 							</div>
 						</div>

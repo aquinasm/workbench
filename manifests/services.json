@@ -57,8 +57,13 @@
       "version": "12.3.4",
       "description": "MariaDB 12.3 LTS with isolated per-version data directory",
       "default_port": 3306,
-      "size_hint_mb": 120,
+      "size_hint_mb": 95,
       "targets": {
+        "macos-aarch64": {
+          "url": "https://formulae.brew.sh/api/formula/mariadb@12.3.json",
+          "format": "homebrew-bottle",
+          "strip_components": 2
+        },
         "linux-x86_64": {
           "url": "https://archive.mariadb.org/mariadb-12.3.4/bintar-linux-systemd-x86_64/mariadb-12.3.4-linux-systemd-x86_64.tar.gz",
           "format": "tar.gz",
@@ -74,11 +79,21 @@
     {
       "id": "redis",
       "name": "Redis",
-      "version": "8.2.11",
+      "version": "8.12.0",
       "description": "In-memory cache & queue broker for Laravel Horizon / queues",
       "default_port": 6379,
-      "size_hint_mb": 8,
+      "size_hint_mb": 12,
       "targets": {
+        "macos-aarch64": {
+          "url": "https://formulae.brew.sh/api/formula/redis.json",
+          "format": "homebrew-bottle",
+          "strip_components": 2
+        },
+        "linux-x86_64": {
+          "url": "https://formulae.brew.sh/api/formula/redis.json",
+          "format": "homebrew-bottle",
+          "strip_components": 2
+        },
         "windows-x86_64": {
           "url": "https://github.com/tporadowski/redis/releases/download/v5.0.14.1/Redis-x64-5.0.14.1.zip",
           "format": "zip",
@@ -92,8 +107,19 @@
       "version": "2.4.71",
       "description": "Apache HTTP Server with full .htaccess support for PHP/Laravel apps",
       "default_port": 8081,
-      "size_hint_mb": 18,
-      "targets": {}
+      "size_hint_mb": 22,
+      "targets": {
+        "macos-aarch64": {
+          "url": "https://formulae.brew.sh/api/formula/httpd.json",
+          "format": "homebrew-bottle",
+          "strip_components": 2
+        },
+        "linux-x86_64": {
+          "url": "https://formulae.brew.sh/api/formula/httpd.json",
+          "format": "homebrew-bottle",
+          "strip_components": 2
+        }
+      }
     }
   ]
 }
