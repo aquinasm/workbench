@@ -1,4 +1,4 @@
-use crate::config::{load_config, save_config, shims_dir, workbench_home, LocalSite};
+use crate::config::{load_config, save_config, shims_dir, workbench_home, DbServerProfile, LocalSite};
 use crate::runtimes::current_platform_key;
 use crate::storage::dir_size_bytes;
 use flate2::read::GzDecoder;
@@ -1144,30 +1144,104 @@ pub async fn start_service(
             c
         }
         "mariadb" => {
-            let bin = managed_binary_for_service("mariadb", &svc.version)
+            let managed_bin = managed_binary_for_service("mariadb", &svc.version);
+            let managed_basedir = managed_bin
+                .as_ref()
+                .map(|_| service_install_dir("mariadb", &svc.version));
+            let bin = managed_bin
                 .or_else(|| host_binary_for_service("mariadb").map(PathBuf::from))
                 .ok_or_else(|| {
                     "MariaDB binary not found. Install MariaDB via Workbench or Homebrew/apt."
                         .to_string()
                 })?;
+
             let mysql_sys = data_dir.join("mysql");
             if !mysql_sys.is_dir() {
-                // Initialize isolated datadir on first run
+                // Clean any partial InnoDB/Aria files from an aborted earlier startup before initializing
+                if let Ok(entries) = fs::read_dir(&data_dir) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        if p.is_dir() {
+                            let _ = fs::remove_dir_all(&p);
+                        } else {
+                            let _ = fs::remove_file(&p);
+                        }
+                    }
+                }
                 let init_bin = bin
                     .parent()
                     .map(|p| p.join("mariadb-install-db"))
                     .filter(|p| p.is_file())
-                    .or_else(|| find_host_binary(&["mariadb-install-db", "mysql_install_db"]).map(PathBuf::from));
+                    .or_else(|| {
+                        find_host_binary(&["mariadb-install-db", "mysql_install_db"])
+                            .map(PathBuf::from)
+                    });
                 if let Some(init) = init_bin {
-                    let _ = std::process::Command::new(init)
+                    let mut init_cmd = std::process::Command::new(init);
+                    if let Some(ref base) = managed_basedir {
+                        init_cmd.arg(format!("--basedir={}", base.display()));
+                    }
+                    init_cmd
                         .arg(format!("--datadir={}", data_dir.display()))
-                        .output();
+                        .arg("--auth-root-authentication-method=normal")
+                        .arg("--skip-test-db");
+                    let out = init_cmd
+                        .output()
+                        .map_err(|e| format!("Failed running mariadb-install-db: {}", e))?;
+                    if !out.status.success() {
+                        let err = format!(
+                            "{}\n{}",
+                            String::from_utf8_lossy(&out.stdout),
+                            String::from_utf8_lossy(&out.stderr)
+                        );
+                        return Err(format!(
+                            "MariaDB datadir initialization failed: {}",
+                            err.trim()
+                        ));
+                    }
                 }
             }
+
+            // Auto-configure Workbench's Databases tab so managed MariaDB connects automatically
+            let mut db_cfg_changed = false;
+            if let Some(local) = cfg.db_servers.iter_mut().find(|s| s.id == "local-mariadb") {
+                if local.port != port {
+                    local.port = port;
+                    local.name = format!("Local MariaDB ({})", port);
+                    db_cfg_changed = true;
+                }
+            } else if !cfg
+                .db_servers
+                .iter()
+                .any(|s| s.engine == "mariadb" && (s.host == "127.0.0.1" || s.host == "localhost") && s.port == port)
+            {
+                cfg.db_servers.insert(
+                    0,
+                    DbServerProfile {
+                        id: "local-mariadb".to_string(),
+                        name: format!("Local MariaDB ({})", port),
+                        engine: "mariadb".to_string(),
+                        host: "127.0.0.1".to_string(),
+                        port,
+                        username: "root".to_string(),
+                        password: String::new(),
+                    },
+                );
+                db_cfg_changed = true;
+            }
+            if db_cfg_changed {
+                let _ = save_config(&cfg);
+            }
+
             let mut c = Command::new(bin);
+            if let Some(ref base) = managed_basedir {
+                c.arg(format!("--basedir={}", base.display()));
+            }
             c.arg(format!("--datadir={}", data_dir.display()))
                 .arg(format!("--port={}", port))
                 .arg("--bind-address=127.0.0.1")
+                .arg(format!("--socket={}", data_dir.join("mariadb.sock").display()))
+                .arg(format!("--pid-file={}", data_dir.join("mariadb.pid").display()))
                 .arg("--console");
             c
         }
