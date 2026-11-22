@@ -6,7 +6,7 @@ OS="$(uname -s)"
 ARCH="$(uname -m)"
 
 echo "==> Detecting latest Workbench release from github.com/${REPO}..."
-TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases?per_page=1" | grep -m1 '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')"
+TAG="$(curl -fsSL --connect-timeout 5 --retry 3 --retry-delay 1 "https://api.github.com/repos/${REPO}/releases?per_page=1" | grep -m1 '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')"
 
 if [ -z "$TAG" ]; then
   echo "Error: Could not determine latest release tag." >&2
@@ -24,7 +24,7 @@ if [ "$OS" = "Darwin" ]; then
   trap 'rm -rf "$TMP_DIR"' EXIT
 
   echo "==> Downloading Workbench ${TAG} (${ARCH})..."
-  curl -fL "$URL" -o "${TMP_DIR}/${ASSET}"
+  curl -fL --progress-bar --connect-timeout 5 --retry 3 --retry-delay 1 "$URL" -o "${TMP_DIR}/${ASSET}"
 
   echo "==> Extracting Workbench.app to /Applications..."
   tar -xzf "${TMP_DIR}/${ASSET}" -C "$TMP_DIR"
