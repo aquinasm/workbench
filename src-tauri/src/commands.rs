@@ -685,13 +685,42 @@ pub async fn get_service_logs_cmd(
 }
 
 #[tauri::command]
-pub fn add_local_site_cmd(site: LocalSite) -> Result<Vec<LocalSite>, String> {
-    add_local_site(site)
+pub async fn add_local_site_cmd(
+    app: AppHandle,
+    sup: State<'_, SharedSupervisor>,
+    site: LocalSite,
+) -> Result<Vec<LocalSite>, String> {
+    let server = site.server.clone();
+    let sites = add_local_site(site)?;
+    let is_running = {
+        let guard = sup.lock().await;
+        guard.running.contains_key(&server)
+    };
+    if is_running {
+        let _ = restart_service(&app, &sup, &server, None).await;
+        let _ = app.emit("services-changed", ());
+    }
+    Ok(sites)
 }
 
 #[tauri::command]
-pub fn remove_local_site_cmd(domain: String) -> Result<Vec<LocalSite>, String> {
-    remove_local_site(&domain)
+pub async fn remove_local_site_cmd(
+    app: AppHandle,
+    sup: State<'_, SharedSupervisor>,
+    domain: String,
+) -> Result<Vec<LocalSite>, String> {
+    let sites = remove_local_site(&domain)?;
+    for server in ["caddy", "apache"] {
+        let is_running = {
+            let guard = sup.lock().await;
+            guard.running.contains_key(server)
+        };
+        if is_running {
+            let _ = restart_service(&app, &sup, server, None).await;
+        }
+    }
+    let _ = app.emit("services-changed", ());
+    Ok(sites)
 }
 
 #[tauri::command]

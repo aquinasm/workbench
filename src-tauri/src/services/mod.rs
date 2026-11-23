@@ -89,6 +89,7 @@ pub struct RunningProcess {
 #[derive(Default)]
 pub struct ServiceSupervisor {
     pub running: HashMap<String, RunningProcess>,
+    pub site_workers: HashMap<String, RunningProcess>,
     pub logs: HashMap<String, VecDeque<String>>,
 }
 
@@ -893,6 +894,165 @@ fn load_or_create_pma_secret() -> String {
     secret
 }
 
+fn php_site_worker_ports(sites: &[LocalSite]) -> HashMap<String, u16> {
+    let mut map = HashMap::new();
+    let mut idx = 0u16;
+    for s in sites {
+        if s.server == "caddy" && s.mode == "php" && validate_local_site(s).is_ok() {
+            let key = s.domain.to_ascii_lowercase();
+            map.entry(key).or_insert_with(|| {
+                let p = 19100u16.saturating_add(idx);
+                idx = idx.saturating_add(1);
+                p
+            });
+        }
+    }
+    map
+}
+
+fn resolve_project_php_binary(project_path: &str) -> Option<PathBuf> {
+    // 1. Respect per-project .workbench.json PHP pin first
+    let pin_file = Path::new(project_path).join(".workbench.json");
+    if let Ok(raw) = fs::read_to_string(&pin_file) {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
+            if let Some(ver) = val
+                .get("runtimes")
+                .and_then(|r| r.get("php"))
+                .and_then(|v| v.as_str())
+            {
+                let base = crate::runtimes::runtime_install_dir("php", ver);
+                for cand in [
+                    base.join("php"),
+                    base.join("bin/php"),
+                    base.join("php.exe"),
+                ] {
+                    if cand.is_file() {
+                        return Some(cand);
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Fallback to Workbench active PHP shim
+    let shim_php = shims_dir().join(if cfg!(target_os = "windows") {
+        "php.exe"
+    } else {
+        "php"
+    });
+    if shim_php.is_file() {
+        return Some(shim_php);
+    }
+
+    // 3. Fallback to host PHP
+    find_host_binary(&["php"]).map(PathBuf::from)
+}
+
+async fn stop_php_site_workers(sup: &SharedSupervisor) {
+    let workers: Vec<RunningProcess> = {
+        let mut guard = sup.lock().await;
+        guard.site_workers.drain().map(|(_, p)| p).collect()
+    };
+    for mut proc_info in workers {
+        if let Some(pid) = proc_info.pid {
+            #[cfg(unix)]
+            {
+                let _ = std::process::Command::new("kill")
+                    .args(["-TERM", &pid.to_string()])
+                    .status();
+            }
+            #[cfg(target_os = "windows")]
+            {
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/PID", &pid.to_string(), "/F"])
+                    .status();
+            }
+        }
+        let _ = tokio::time::timeout(Duration::from_secs(2), proc_info.child.wait()).await;
+        let _ = proc_info.child.kill().await;
+    }
+}
+
+async fn sync_php_site_workers(sup: &SharedSupervisor, sites: &[LocalSite]) {
+    stop_php_site_workers(sup).await;
+
+    let ports = php_site_worker_ports(sites);
+    if ports.is_empty() {
+        return;
+    }
+
+    let router_dir = workbench_home().join("data").join("caddy");
+    let _ = fs::create_dir_all(&router_dir);
+    let router_path = router_dir.join("workbench-php-router.php");
+    let router_src = r#"<?php
+$uri = urldecode(parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/');
+$docRoot = $_SERVER['DOCUMENT_ROOT'] ?? getcwd();
+$file = $docRoot . $uri;
+if ($uri !== '/' && is_file($file)) {
+    return false;
+}
+$_SERVER['SCRIPT_NAME'] = '/index.php';
+require $docRoot . '/index.php';
+"#;
+    let _ = fs::write(&router_path, router_src);
+
+    for site in sites {
+        if site.server != "caddy" || site.mode != "php" || validate_local_site(site).is_err() {
+            continue;
+        }
+        let key = site.domain.to_ascii_lowercase();
+        let Some(&worker_port) = ports.get(&key) else {
+            continue;
+        };
+        let Some(php_bin) = resolve_project_php_binary(&site.project_path) else {
+            let mut guard = sup.lock().await;
+            guard.push_log(
+                "caddy",
+                format!("Skipped PHP worker for {}: no PHP binary installed.", site.domain),
+            );
+            continue;
+        };
+        let docroot = match &site.docroot_subpath {
+            Some(sub) if !sub.trim().is_empty() => Path::new(&site.project_path).join(sub),
+            _ => Path::new(&site.project_path).to_path_buf(),
+        };
+        if !docroot.is_dir() {
+            continue;
+        }
+
+        let mut cmd = Command::new(&php_bin);
+        cmd.env("PHP_CLI_SERVER_WORKERS", "4")
+            .args(["-S", &format!("127.0.0.1:{}", worker_port), "-t"])
+            .arg(&docroot)
+            .arg(&router_path)
+            .current_dir(&site.project_path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        if let Ok(child) = cmd.spawn() {
+            let pid = child.id();
+            let mut guard = sup.lock().await;
+            guard.push_log(
+                "caddy",
+                format!(
+                    "Started PHP worker for {} on 127.0.0.1:{} ({})",
+                    site.domain,
+                    worker_port,
+                    php_bin.display()
+                ),
+            );
+            guard.site_workers.insert(
+                key,
+                RunningProcess {
+                    child,
+                    pid,
+                    port: worker_port,
+                },
+            );
+        }
+    }
+}
+
 pub fn generate_caddyfile(port: u16, sites: &[LocalSite], pma_port: u16) -> String {
     let mut out = String::new();
     out.push_str("# Auto-generated by Workbench — do not edit manually\n");
@@ -902,6 +1062,7 @@ pub fn generate_caddyfile(port: u16, sites: &[LocalSite], pma_port: u16) -> Stri
         .iter()
         .filter(|s| s.server == "caddy" && validate_local_site(s).is_ok())
         .collect();
+    let php_ports = php_site_worker_ports(sites);
 
     let https_port = if port == 80 { 443 } else { port.saturating_add(363) };
     let lan_ip = get_local_lan_ip();
@@ -914,7 +1075,7 @@ pub fn generate_caddyfile(port: u16, sites: &[LocalSite], pma_port: u16) -> Stri
         };
         out.push_str(&format!("# LAN-exposed site: {}\n", lan_site.domain));
         out.push_str(&format!("{} {{\n", lan_addr));
-        write_caddy_site_body(&mut out, lan_site);
+        write_caddy_site_body(&mut out, lan_site, &php_ports);
         out.push_str("}\n\n");
     } else {
         out.push_str(&format!(
@@ -936,14 +1097,14 @@ pub fn generate_caddyfile(port: u16, sites: &[LocalSite], pma_port: u16) -> Stri
             format!("http://{}:{}", site.domain, port)
         };
         out.push_str(&format!("{} {{\n", host));
-        write_caddy_site_body(&mut out, site);
+        write_caddy_site_body(&mut out, site, &php_ports);
         out.push_str("}\n\n");
 
         if site.https {
             let domain_only = site.domain.split(':').next().unwrap_or(&site.domain);
             out.push_str(&format!("https://{}:{} {{\n", domain_only, https_port));
             out.push_str("\ttls internal\n");
-            write_caddy_site_body(&mut out, site);
+            write_caddy_site_body(&mut out, site, &php_ports);
             out.push_str("}\n\n");
         }
     }
@@ -951,19 +1112,22 @@ pub fn generate_caddyfile(port: u16, sites: &[LocalSite], pma_port: u16) -> Stri
     out
 }
 
-fn write_caddy_site_body(out: &mut String, site: &LocalSite) {
+fn write_caddy_site_body(out: &mut String, site: &LocalSite, php_ports: &HashMap<String, u16>) {
     if site.mode == "proxy" {
         let target_port = site.proxy_port.unwrap_or(5173);
         out.push_str(&format!("\treverse_proxy 127.0.0.1:{}\n", target_port));
+    } else if site.mode == "php" {
+        let worker_port = php_ports
+            .get(&site.domain.to_ascii_lowercase())
+            .copied()
+            .unwrap_or(19100);
+        out.push_str(&format!("\treverse_proxy 127.0.0.1:{}\n", worker_port));
     } else {
         let root = match &site.docroot_subpath {
             Some(sub) if !sub.trim().is_empty() => Path::new(&site.project_path).join(sub),
             _ => Path::new(&site.project_path).to_path_buf(),
         };
         out.push_str(&format!("\troot * \"{}\"\n", root.display()));
-        if site.mode == "php" {
-            out.push_str("\tphp_fastcgi 127.0.0.1:9000\n");
-        }
         out.push_str("\tfile_server\n");
     }
 }
@@ -1080,6 +1244,7 @@ pub async fn start_service(
             let bin = managed_binary_for_service("caddy", &svc.version)
                 .or_else(|| host_binary_for_service("caddy").map(PathBuf::from))
                 .ok_or_else(|| "Caddy is not installed. Click Install first.".to_string())?;
+            sync_php_site_workers(sup, &cfg.sites).await;
             let pma_port = cfg.service_ports.get("phpmyadmin").copied().unwrap_or(8088);
             let caddyfile = data_dir.join("Caddyfile");
             fs::write(&caddyfile, generate_caddyfile(port, &cfg.sites, pma_port))
@@ -1340,6 +1505,9 @@ pub async fn start_service(
 /// Gracefully terminates a supervised service (SIGTERM on Unix / polite taskkill on Windows),
 /// waiting up to 5 seconds for clean database/cache flush before falling back to force-kill.
 pub async fn stop_service(sup: &SharedSupervisor, service_id: &str) -> Result<(), String> {
+    if service_id == "caddy" {
+        stop_php_site_workers(sup).await;
+    }
     let mut proc_opt = {
         let mut guard = sup.lock().await;
         guard.running.remove(service_id)
@@ -2084,7 +2252,7 @@ mod tests {
         assert!(caddy.contains("http://shop.test:8080"));
         assert!(caddy.contains("https://shop.test:8443"));
         assert!(caddy.contains("tls internal"));
-        assert!(caddy.contains("php_fastcgi 127.0.0.1:9000"));
+        assert!(caddy.contains("reverse_proxy 127.0.0.1:19100"));
         assert!(caddy.contains("reverse_proxy 127.0.0.1:5173"));
         assert!(caddy.contains("http://pma.test:8080"));
 
