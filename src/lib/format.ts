@@ -10,10 +10,13 @@ export function formatBytes(bytes: number): string {
 }
 
 export function buildSiteUrl(site: LocalSite, network: NetworkStatus | null): string {
-	const useHttps = site.server === 'caddy' && site.https;
+	const useHttps = site.https;
 	const proto = useHttps ? 'https' : 'http';
+	if (network?.portless_enabled) {
+		return `${proto}://${site.domain}`;
+	}
 	const port =
-		site.server === 'caddy'
+		site.server === 'caddy' || useHttps
 			? useHttps
 				? (network?.caddy_https_port ?? 8443)
 				: (network?.caddy_port ?? 8080)

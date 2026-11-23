@@ -48,8 +48,9 @@
 		return base ? `${base}.test` : '';
 	});
 
+	const portless = $derived(wb.networkStatus?.portless_enabled ?? false);
 	const httpPort = $derived(
-		serverInput === 'apache'
+		serverInput === 'apache' && !portless
 			? (wb.networkStatus?.apache_port ?? 8081)
 			: (wb.networkStatus?.caddy_port ?? 8080)
 	);
@@ -57,7 +58,10 @@
 
 	const localPreviewUrl = $derived.by(() => {
 		if (!resolvedDomain) return '';
-		if (httpsInput && serverInput === 'caddy') {
+		if (portless) {
+			return httpsInput ? `https://${resolvedDomain}` : `http://${resolvedDomain}`;
+		}
+		if (httpsInput) {
 			return httpsPort === 443
 				? `https://${resolvedDomain}`
 				: `https://${resolvedDomain}:${httpsPort}`;
@@ -427,14 +431,15 @@
 											Local HTTPS (SSL)
 										</span>
 										<span class="block text-[11px]" style="color: var(--text-muted);">
-											{serverInput === 'caddy' ? 'Auto cert via Caddy internal CA' : 'Requires Caddy server'}
+											{serverInput === 'caddy'
+												? 'Auto cert via Caddy internal CA'
+												: 'Auto TLS via Caddy front-door proxy'}
 										</span>
 									</span>
 								</span>
 								<input
 									type="checkbox"
 									bind:checked={httpsInput}
-									disabled={serverInput !== 'caddy'}
 									class="h-4 w-4 shrink-0 cursor-pointer"
 								/>
 							</label>

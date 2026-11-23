@@ -20,9 +20,10 @@ use crate::runtimes::{
 };
 use crate::services::{
     add_local_site, generate_apache_conf, generate_caddyfile, get_network_status, get_service_logs,
-    install_service, list_services, remove_local_site, restart_service, start_all_services,
-    start_service, stop_all_services, stop_service, sync_hosts_file, trust_local_ca,
-    uninstall_service, NetworkStatus, ServiceLogsResponse, ServiceStatusInfo, SharedSupervisor,
+    install_service, list_services, reload_caddy_or_restart, remove_local_site, restart_service,
+    start_all_services, start_service, stop_all_services, stop_service, sync_hosts_file,
+    trust_local_ca, uninstall_service, NetworkStatus, ServiceLogsResponse, ServiceStatusInfo,
+    SharedSupervisor,
 };
 use crate::shell::{
     clean_uninstall_workbench, detect_system_tools, get_shell_status, install_shell_integration,
@@ -692,12 +693,21 @@ pub async fn add_local_site_cmd(
 ) -> Result<Vec<LocalSite>, String> {
     let server = site.server.clone();
     let sites = add_local_site(site)?;
-    let is_running = {
+    let (caddy_running, apache_running) = {
         let guard = sup.lock().await;
-        guard.running.contains_key(&server)
+        (
+            guard.running.contains_key("caddy"),
+            guard.running.contains_key("apache"),
+        )
     };
-    if is_running {
-        let _ = restart_service(&app, &sup, &server, None).await;
+    // Caddy proxies both Caddy sites and Apache sites, so always gracefully reload it when running
+    if caddy_running {
+        let _ = reload_caddy_or_restart(&app, &sup).await;
+    }
+    if server == "apache" && apache_running {
+        let _ = restart_service(&app, &sup, "apache", None).await;
+    }
+    if caddy_running || apache_running {
         let _ = app.emit("services-changed", ());
     }
     Ok(sites)
@@ -710,14 +720,18 @@ pub async fn remove_local_site_cmd(
     domain: String,
 ) -> Result<Vec<LocalSite>, String> {
     let sites = remove_local_site(&domain)?;
-    for server in ["caddy", "apache"] {
-        let is_running = {
-            let guard = sup.lock().await;
-            guard.running.contains_key(server)
-        };
-        if is_running {
-            let _ = restart_service(&app, &sup, server, None).await;
-        }
+    let (caddy_running, apache_running) = {
+        let guard = sup.lock().await;
+        (
+            guard.running.contains_key("caddy"),
+            guard.running.contains_key("apache"),
+        )
+    };
+    if caddy_running {
+        let _ = reload_caddy_or_restart(&app, &sup).await;
+    }
+    if apache_running {
+        let _ = restart_service(&app, &sup, "apache", None).await;
     }
     let _ = app.emit("services-changed", ());
     Ok(sites)
@@ -732,7 +746,8 @@ pub fn preview_webserver_config_cmd(server: String) -> Result<String, String> {
     } else {
         let port = cfg.service_ports.get("caddy").copied().unwrap_or(8080);
         let pma_port = cfg.service_ports.get("phpmyadmin").copied().unwrap_or(8088);
-        Ok(generate_caddyfile(port, &cfg.sites, pma_port))
+        let apache_port = cfg.service_ports.get("apache").copied().unwrap_or(8081);
+        Ok(generate_caddyfile(port, &cfg.sites, pma_port, apache_port))
     }
 }
 

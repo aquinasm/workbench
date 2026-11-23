@@ -381,8 +381,12 @@
 							<strong style="color: var(--text-primary);">{wb.networkStatus.lan_ip ?? 'Not detected'}</strong>
 						</div>
 						<div class="flex items-center justify-between gap-2">
-							<span style="color: var(--text-muted);">HTTPS Port</span>
-							<strong style="color: var(--text-primary);">:{wb.networkStatus.caddy_https_port}</strong>
+							<span style="color: var(--text-muted);">Routing</span>
+							<strong style="color: {wb.networkStatus.portless_enabled ? 'var(--success)' : 'var(--text-primary)'};">
+								{wb.networkStatus.portless_enabled
+									? 'Portless (:80 / :443)'
+									: `HTTP :${wb.networkStatus.caddy_port} / HTTPS :${wb.networkStatus.caddy_https_port}`}
+							</strong>
 						</div>
 						<div class="flex items-center justify-between gap-2">
 							<span class="shrink-0" style="color: var(--text-muted);">Synced ({wb.networkStatus.synced_domains.length})</span>
