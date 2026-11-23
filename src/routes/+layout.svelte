@@ -2,6 +2,7 @@
 	import '../app.css';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { listen } from '@tauri-apps/api/event';
 	import { wb } from '$lib/stores/workbench.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import TerminalDrawer from '$lib/components/TerminalDrawer.svelte';
@@ -13,12 +14,13 @@
 	const shortcutRoutes: Record<string, string> = {
 		'1': '/',
 		'2': '/projects',
-		'3': '/databases',
-		'4': '/services',
-		'5': '/runtimes',
-		'6': '/storage',
-		'7': '/settings',
-		'8': '/about'
+		'3': '/domains',
+		'4': '/databases',
+		'5': '/services',
+		'6': '/runtimes',
+		'7': '/storage',
+		'8': '/settings',
+		'9': '/about'
 	};
 
 	onMount(() => {
@@ -40,8 +42,20 @@
 			}
 		};
 		window.addEventListener('keydown', onKey);
+		let unlistenTrayNav: (() => void) | null = null;
+		void listen<string>('tray-navigate', (ev) => {
+			if (typeof ev.payload === 'string' && ev.payload.startsWith('/')) {
+				void goto(ev.payload);
+			}
+		})
+			.then((fn) => {
+				unlistenTrayNav = fn;
+			})
+			.catch(() => {});
+
 		return () => {
 			window.removeEventListener('keydown', onKey);
+			unlistenTrayNav?.();
 			wb.destroy();
 		};
 	});

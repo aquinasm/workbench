@@ -370,8 +370,12 @@
 						style="background-color: var(--bg-app); color: var(--text-secondary);"
 					>
 						<div class="flex items-center justify-between gap-2">
-							<span style="color: var(--text-muted);">Hosts file</span>
-							<strong class="truncate" style="color: var(--text-primary);">{wb.networkStatus.hosts_path}</strong>
+							<span style="color: var(--text-muted);">DNS Mode</span>
+							<strong style="color: {wb.networkStatus.wildcard_dns_enabled ? 'var(--success)' : 'var(--text-primary)'};">
+								{wb.networkStatus.wildcard_dns_enabled
+									? 'Wildcard *.test (Zero-prompt)'
+									: wb.networkStatus.hosts_path}
+							</strong>
 						</div>
 						<div class="flex items-center justify-between gap-2">
 							<span class="inline-flex items-center gap-1.5" style="color: var(--text-muted);">

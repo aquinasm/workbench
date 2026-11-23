@@ -6,6 +6,7 @@
 	import {
 		LayoutDashboard,
 		FolderKanban,
+		Globe,
 		HardDrive,
 		Cpu,
 		Server,
@@ -29,12 +30,13 @@
 	const navItems = [
 		{ href: '/', label: 'Dashboard', shortcut: '⌘1', icon: LayoutDashboard },
 		{ href: '/projects', label: 'Projects', shortcut: '⌘2', icon: FolderKanban },
-		{ href: '/databases', label: 'Databases', shortcut: '⌘3', icon: Database },
-		{ href: '/services', label: 'Services', shortcut: '⌘4', icon: Server },
-		{ href: '/runtimes', label: 'Runtimes', shortcut: '⌘5', icon: Cpu },
-		{ href: '/storage', label: 'Storage', shortcut: '⌘6', icon: HardDrive },
-		{ href: '/settings', label: 'Settings', shortcut: '⌘7', icon: Settings },
-		{ href: '/about', label: 'About', shortcut: '⌘8', icon: Info }
+		{ href: '/domains', label: 'Domains', shortcut: '⌘3', icon: Globe },
+		{ href: '/databases', label: 'Databases', shortcut: '⌘4', icon: Database },
+		{ href: '/services', label: 'Services', shortcut: '⌘5', icon: Server },
+		{ href: '/runtimes', label: 'Runtimes', shortcut: '⌘6', icon: Cpu },
+		{ href: '/storage', label: 'Storage', shortcut: '⌘7', icon: HardDrive },
+		{ href: '/settings', label: 'Settings', shortcut: '⌘8', icon: Settings },
+		{ href: '/about', label: 'About', shortcut: '⌘9', icon: Info }
 	];
 
 	const runningServicesCount = $derived(
@@ -224,7 +226,7 @@
 			<a
 				href="/about"
 				class="flex items-center justify-between rounded-lg px-1 py-0.5 transition hover:bg-[var(--bg-surface-hover)]"
-				title="About Workbench (⌘8)"
+				title="About Workbench (⌘9)"
 			>
 				<span class="wb-kicker">Version</span>
 				<span class="font-mono text-xs font-semibold" style="color: var(--text-primary);">

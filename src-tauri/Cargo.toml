@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "workbench"
-version = "0.1.0"
+version = "0.1.0-beta.2"
 description = "Cross-platform local development environment"
 authors = ["Aquinas Marydasan"]
 license = "MIT"
@@ -31,7 +31,7 @@ rayon = "1.10"
 trash = "5"
 dirs = "6"
 chrono = { version = "0.4", features = ["serde"] }
-tokio = { version = "1", features = ["process", "io-util", "rt-multi-thread", "sync"] }
+tokio = { version = "1", features = ["net", "process", "io-util", "rt-multi-thread", "sync"] }
 thiserror = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 futures-util = "0.3"

@@ -23,6 +23,7 @@ export interface NetworkStatus {
 	caddy_https_port: number;
 	apache_port: number;
 	portless_enabled: boolean;
+	wildcard_dns_enabled: boolean;
 }
 
 export interface DbServerProfile {

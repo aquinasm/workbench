@@ -349,7 +349,16 @@ pub async fn list_services(sup: &SharedSupervisor) -> Result<Vec<ServiceStatusIn
                 };
 
                 let url = match svc.id.as_str() {
-                    "phpmyadmin" | "caddy" | "apache" => Some(format!("http://127.0.0.1:{}", port)),
+                    "phpmyadmin" => {
+                        let caddy_port = cfg.service_ports.get("caddy").copied().unwrap_or(8080);
+                        if is_portless_routing_active(caddy_port) && running_pids.contains_key("caddy")
+                        {
+                            Some("https://phpmyadmin.test".to_string())
+                        } else {
+                            Some(format!("http://127.0.0.1:{}", port))
+                        }
+                    }
+                    "caddy" | "apache" => Some(format!("http://127.0.0.1:{}", port)),
                     _ => None,
                 };
 
@@ -791,20 +800,57 @@ pub async fn uninstall_service(sup: &SharedSupervisor, service_id: &str) -> Resu
 
 // --- Pure Config Generators (Caddyfile, Apache, phpMyAdmin, Redis) ---
 
+const RESERVED_DOMAINS: &[&str] = &[
+    "phpmyadmin.test",
+    "pma.test",
+    "localhost.test",
+    "workbench.test",
+];
+
+pub fn normalize_site_domain(raw: &str) -> String {
+    raw.trim()
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_end_matches('/')
+        .to_ascii_lowercase()
+}
+
 pub fn validate_local_site(site: &LocalSite) -> Result<(), String> {
-    let domain = site.domain.trim();
-    if domain.is_empty() || domain.len() > 255 {
-        return Err("Site domain must be between 1 and 255 characters.".to_string());
+    let domain = normalize_site_domain(&site.domain);
+    if domain.is_empty() || domain.len() > 253 {
+        return Err("Site domain must be between 1 and 253 characters.".to_string());
     }
     if !domain
         .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':'))
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))
     {
-        return Err(format!("Invalid characters in site domain: {}", site.domain));
+        return Err(format!(
+            "Invalid characters in site domain '{}'. Use letters, numbers, hyphens, and dots only.",
+            site.domain
+        ));
     }
-    let host_part = domain.split(':').next().unwrap_or(domain).to_ascii_lowercase();
-    if !host_part.ends_with(".test") || host_part.len() <= ".test".len() {
+    if !domain.ends_with(".test") || domain.len() <= ".test".len() {
         return Err("Local site domains must use the .test TLD (e.g. myapp.test).".to_string());
+    }
+    for label in domain.split('.') {
+        if label.is_empty() || label.len() > 63 {
+            return Err(format!(
+                "Invalid domain '{}': each label must be 1–63 characters with no consecutive dots.",
+                domain
+            ));
+        }
+        if label.starts_with('-') || label.ends_with('-') {
+            return Err(format!(
+                "Invalid domain '{}': labels cannot start or end with a hyphen.",
+                domain
+            ));
+        }
+    }
+    if RESERVED_DOMAINS.contains(&domain.as_str()) {
+        return Err(format!(
+            "'{}' is a reserved system domain and cannot be assigned to a project.",
+            domain
+        ));
     }
     if site.server != "caddy" && site.server != "apache" {
         return Err(format!("Unsupported web server: {}", site.server));
@@ -812,8 +858,22 @@ pub fn validate_local_site(site: &LocalSite) -> Result<(), String> {
     if !matches!(site.mode.as_str(), "php" | "proxy" | "static") {
         return Err(format!("Unsupported site mode: {}", site.mode));
     }
-    if site.project_path.contains(['\n', '\r', '\0', '"', '{', '}']) {
-        return Err("Project path contains invalid characters for web server config.".to_string());
+    if site.mode == "proxy" {
+        let port = site.proxy_port.unwrap_or(0);
+        if port < 1024 {
+            return Err("Proxy target port must be between 1024 and 65535.".to_string());
+        }
+        if matches!(port, 8080 | 8443 | 8081 | 8088 | 3306 | 6379 | 15353) {
+            return Err(format!(
+                "Proxy port {} conflicts with a Workbench internal service port.",
+                port
+            ));
+        }
+    }
+    if site.project_path.trim().is_empty()
+        || site.project_path.contains(['\n', '\r', '\0', '"', '{', '}'])
+    {
+        return Err("Project path is empty or contains invalid characters.".to_string());
     }
     if let Some(ref sub) = site.docroot_subpath {
         let trimmed = sub.trim();
@@ -1118,11 +1178,11 @@ pub fn generate_caddyfile(
     }
 
     out.push_str(&format!(
-        "http://pma.test:{} {{\n\treverse_proxy 127.0.0.1:{}\n}}\n\n",
+        "http://phpmyadmin.test:{} {{\n\treverse_proxy 127.0.0.1:{}\n}}\n\n",
         port, pma_port
     ));
     out.push_str(&format!(
-        "https://pma.test:{} {{\n\ttls internal\n\treverse_proxy 127.0.0.1:{}\n}}\n\n",
+        "https://phpmyadmin.test:{} {{\n\ttls internal\n\treverse_proxy 127.0.0.1:{}\n}}\n\n",
         https_port, pma_port
     ));
 
@@ -2045,18 +2105,41 @@ pub async fn get_service_logs(
     .map_err(|e| format!("Failed reading logs: {}", e))
 }
 
-pub fn add_local_site(site: LocalSite) -> Result<Vec<LocalSite>, String> {
+pub fn add_local_site(mut site: LocalSite) -> Result<Vec<LocalSite>, String> {
+    site.domain = normalize_site_domain(&site.domain);
     validate_local_site(&site)?;
+    if !Path::new(&site.project_path).is_dir() {
+        return Err(format!(
+            "Project directory does not exist: {}",
+            site.project_path
+        ));
+    }
+
     let mut cfg = load_config()?;
+
+    // Duplicate check: block assigning a domain that is already linked to a different project
+    if let Some(conflict) = cfg
+        .sites
+        .iter()
+        .find(|s| s.domain.eq_ignore_ascii_case(&site.domain) && s.project_path != site.project_path)
+    {
+        return Err(format!(
+            "Domain '{}' is already linked to another project ({}). Unlink it first or choose a different domain.",
+            site.domain, conflict.project_path
+        ));
+    }
+
     // If enabling LAN exposure on this Caddy site, ensure only one site claims the LAN port
     if site.expose_lan && site.server == "caddy" {
         for existing in cfg.sites.iter_mut() {
-            if existing.server == "caddy" && existing.domain != site.domain {
+            if existing.server == "caddy" && !existing.domain.eq_ignore_ascii_case(&site.domain) {
                 existing.expose_lan = false;
             }
         }
     }
-    cfg.sites.retain(|s| s.domain != site.domain);
+
+    cfg.sites
+        .retain(|s| !s.domain.eq_ignore_ascii_case(&site.domain));
     cfg.sites.push(site);
     save_config(&cfg)?;
     Ok(cfg.sites)
@@ -2064,7 +2147,7 @@ pub fn add_local_site(site: LocalSite) -> Result<Vec<LocalSite>, String> {
 
 pub fn remove_local_site(domain: &str) -> Result<Vec<LocalSite>, String> {
     let mut cfg = load_config()?;
-    cfg.sites.retain(|s| s.domain != domain);
+    cfg.sites.retain(|s| !s.domain.eq_ignore_ascii_case(domain));
     save_config(&cfg)?;
     Ok(cfg.sites)
 }
@@ -2085,6 +2168,7 @@ pub struct NetworkStatus {
     pub caddy_https_port: u16,
     pub apache_port: u16,
     pub portless_enabled: bool,
+    pub wildcard_dns_enabled: bool,
 }
 
 pub fn get_local_lan_ip() -> Option<String> {
@@ -2146,10 +2230,10 @@ fn build_hosts_block(domains: &[String]) -> String {
 }
 
 fn desired_hosts_domains(sites: &[LocalSite]) -> Vec<String> {
-    let mut list: Vec<String> = vec!["pma.test".to_string()];
+    let mut list: Vec<String> = vec!["phpmyadmin.test".to_string()];
     for s in sites {
         if validate_local_site(s).is_ok() {
-            let host = s.domain.split(':').next().unwrap_or(&s.domain).to_ascii_lowercase();
+            let host = normalize_site_domain(&s.domain);
             if !list.contains(&host) {
                 list.push(host);
             }
@@ -2248,32 +2332,52 @@ fn patch_macos_pf_conf(existing: &str) -> String {
     out
 }
 
+fn is_wildcard_dns_active() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(content) = fs::read_to_string("/etc/resolver/test") {
+            let port_str = crate::dns::LOCAL_DNS_PORT.to_string();
+            return content.contains("127.0.0.1") && content.contains(&port_str);
+        }
+        false
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
 pub fn get_network_status() -> Result<NetworkStatus, String> {
     let cfg = load_config()?;
     let hosts_path = hosts_file_path();
     let hosts_content = fs::read_to_string(&hosts_path).unwrap_or_default();
 
     let desired = desired_hosts_domains(&cfg.sites);
+    let wildcard_dns_enabled = is_wildcard_dns_active();
     let mut synced_domains = Vec::new();
     let mut missing_domains = Vec::new();
 
-    for domain in desired {
-        let mapped = hosts_content.lines().any(|line| {
-            let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('#') {
-                return false;
+    if wildcard_dns_enabled {
+        synced_domains = desired;
+    } else {
+        for domain in desired {
+            let mapped = hosts_content.lines().any(|line| {
+                let trimmed = line.trim();
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    return false;
+                }
+                let mut parts = trimmed.split_whitespace();
+                let Some(ip) = parts.next() else { return false };
+                if ip != "127.0.0.1" && ip != "::1" {
+                    return false;
+                }
+                parts.any(|h| h.eq_ignore_ascii_case(&domain))
+            });
+            if mapped {
+                synced_domains.push(domain);
+            } else {
+                missing_domains.push(domain);
             }
-            let mut parts = trimmed.split_whitespace();
-            let Some(ip) = parts.next() else { return false };
-            if ip != "127.0.0.1" && ip != "::1" {
-                return false;
-            }
-            parts.any(|h| h.eq_ignore_ascii_case(&domain))
-        });
-        if mapped {
-            synced_domains.push(domain);
-        } else {
-            missing_domains.push(domain);
         }
     }
 
@@ -2296,6 +2400,7 @@ pub fn get_network_status() -> Result<NetworkStatus, String> {
         caddy_https_port,
         apache_port,
         portless_enabled,
+        wildcard_dns_enabled,
     })
 }
 
@@ -2306,16 +2411,20 @@ pub fn sync_hosts_file() -> Result<NetworkStatus, String> {
         .map_err(|e| format!("Failed reading {}: {}", hosts_path.display(), e))?;
 
     let desired = desired_hosts_domains(&cfg.sites);
+    // On macOS, wildcard /etc/resolver/test replaces per-domain /etc/hosts entries so we strip
+    // any stale Workbench block from /etc/hosts instead of growing it forever.
     let mut updated = strip_workbench_hosts_block(&existing);
-    if !updated.is_empty() && !updated.ends_with('\n') {
-        updated.push('\n');
-    }
-    let block = build_hosts_block(&desired);
-    if !block.is_empty() {
-        if !updated.is_empty() && !updated.ends_with("\n\n") {
+    if !cfg!(target_os = "macos") {
+        if !updated.is_empty() && !updated.ends_with('\n') {
             updated.push('\n');
         }
-        updated.push_str(&block);
+        let block = build_hosts_block(&desired);
+        if !block.is_empty() {
+            if !updated.is_empty() && !updated.ends_with("\n\n") {
+                updated.push('\n');
+            }
+            updated.push_str(&block);
+        }
     }
 
     let caddy_port = cfg.service_ports.get("caddy").copied().unwrap_or(8080);
@@ -2324,6 +2433,13 @@ pub fn sync_hosts_file() -> Result<NetworkStatus, String> {
     } else {
         caddy_port.saturating_add(363)
     };
+
+    // Fast path: on macOS, if BOTH wildcard /etc/resolver/test and portless pf routing are already active,
+    // no elevation or /etc/hosts write is ever needed again!
+    #[cfg(target_os = "macos")]
+    if is_wildcard_dns_active() && is_portless_routing_active(caddy_port) {
+        return get_network_status();
+    }
 
     // Fast path: direct write if process already has permission AND portless routing is already active
     if is_portless_routing_active(caddy_port) && fs::write(&hosts_path, &updated).is_ok() {
@@ -2366,32 +2482,49 @@ pub fn sync_hosts_file() -> Result<NetworkStatus, String> {
 
     #[cfg(target_os = "macos")]
     {
-        // Stage portless loopback pf anchor & patched /etc/pf.conf alongside /etc/hosts
-        // so one single macOS admin prompt configures both .test DNS and portless :80/:443 routing.
+        // One-time setup: configure wildcard /etc/resolver/test (zero future password prompts!),
+        // portless loopback pf anchor (80/443 -> 8080/8443), and clean stale /etc/hosts entries.
         let staged_pf_anchor =
             tmp_dir.join(format!(".pf-anchor-{}-{}.staged", std::process::id(), unique_ts));
         let staged_pf_conf =
             tmp_dir.join(format!(".pf-conf-{}-{}.staged", std::process::id(), unique_ts));
+        let staged_resolver =
+            tmp_dir.join(format!(".resolver-test-{}-{}.staged", std::process::id(), unique_ts));
 
         let anchor_content = build_macos_pf_anchor(caddy_port, caddy_https_port);
         let existing_pf_conf = fs::read_to_string("/etc/pf.conf").unwrap_or_default();
         let patched_pf_conf = patch_macos_pf_conf(&existing_pf_conf);
+        let resolver_content = format!(
+            "# Managed by Workbench — wildcard *.test local DNS\nnameserver 127.0.0.1\nport {}\n",
+            crate::dns::LOCAL_DNS_PORT
+        );
 
         let _ = fs::write(&staged_pf_anchor, anchor_content);
         let _ = fs::write(&staged_pf_conf, patched_pf_conf);
+        let _ = fs::write(&staged_resolver, resolver_content);
 
         let anchor_str = staged_pf_anchor.to_string_lossy().to_string();
         let pf_conf_str = staged_pf_conf.to_string_lossy().to_string();
+        let resolver_str = staged_resolver.to_string_lossy().to_string();
 
         // Pass paths via argv and use AppleScript `quoted form of` to eliminate injection risks
-        let script = "on run argv\nset hostsSrc to item 1 of argv\nset anchorSrc to item 2 of argv\nset pfConfSrc to item 3 of argv\ndo shell script \"cp \" & quoted form of hostsSrc & \" /etc/hosts && chmod 644 /etc/hosts && cp \" & quoted form of anchorSrc & \" /etc/pf.anchors/dev.aquinas.workbench && chmod 644 /etc/pf.anchors/dev.aquinas.workbench && cp \" & quoted form of pfConfSrc & \" /etc/pf.conf && chmod 644 /etc/pf.conf && pfctl -f /etc/pf.conf && (pfctl -E >/dev/null 2>&1 || true) && dscacheutil -flushcache && killall -HUP mDNSResponder\" with administrator privileges\nend run";
+        let script = "on run argv\nset hostsSrc to item 1 of argv\nset anchorSrc to item 2 of argv\nset pfConfSrc to item 3 of argv\nset resolverSrc to item 4 of argv\ndo shell script \"cp \" & quoted form of hostsSrc & \" /etc/hosts && chmod 644 /etc/hosts && mkdir -p /etc/resolver && cp \" & quoted form of resolverSrc & \" /etc/resolver/test && chmod 644 /etc/resolver/test && cp \" & quoted form of anchorSrc & \" /etc/pf.anchors/dev.aquinas.workbench && chmod 644 /etc/pf.anchors/dev.aquinas.workbench && cp \" & quoted form of pfConfSrc & \" /etc/pf.conf && chmod 644 /etc/pf.conf && pfctl -f /etc/pf.conf && (pfctl -E >/dev/null 2>&1 || true) && dscacheutil -flushcache && killall -HUP mDNSResponder\" with administrator privileges\nend run";
         let out = std::process::Command::new("osascript")
-            .args(["-e", script, "--", &staged_str, &anchor_str, &pf_conf_str])
+            .args([
+                "-e",
+                script,
+                "--",
+                &staged_str,
+                &anchor_str,
+                &pf_conf_str,
+                &resolver_str,
+            ])
             .output()
             .map_err(|e| format!("Failed launching macOS elevation prompt: {}", e))?;
         let _ = fs::remove_file(&staged);
         let _ = fs::remove_file(&staged_pf_anchor);
         let _ = fs::remove_file(&staged_pf_conf);
+        let _ = fs::remove_file(&staged_resolver);
         if !out.status.success() {
             let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
             return Err(if err.is_empty() {
@@ -2640,7 +2773,8 @@ mod tests {
         assert!(caddy.contains("tls internal"));
         assert!(caddy.contains("reverse_proxy 127.0.0.1:19100"));
         assert!(caddy.contains("reverse_proxy 127.0.0.1:5173"));
-        assert!(caddy.contains("http://pma.test:8080"));
+        assert!(caddy.contains("http://phpmyadmin.test:8080"));
+        assert!(caddy.contains("https://phpmyadmin.test:8443"));
         assert!(caddy.contains("http://legacy.test:8080"));
         assert!(caddy.contains("reverse_proxy 127.0.0.1:8081"));
 

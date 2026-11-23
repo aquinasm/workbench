@@ -605,9 +605,14 @@ pub async fn list_services_cmd(
 }
 
 #[tauri::command]
-pub async fn install_service_cmd(app: AppHandle, service_id: String) -> Result<(), String> {
+pub async fn install_service_cmd(
+    app: AppHandle,
+    sup: State<'_, SharedSupervisor>,
+    service_id: String,
+) -> Result<(), String> {
     let res = install_service(&app, &service_id).await;
     let _ = app.emit("services-changed", ());
+    crate::tray::refresh_tray_menu(&app, &sup).await;
     res
 }
 
@@ -619,6 +624,7 @@ pub async fn uninstall_service_cmd(
 ) -> Result<(), String> {
     let res = uninstall_service(&sup, &service_id).await;
     let _ = app.emit("services-changed", ());
+    crate::tray::refresh_tray_menu(&app, &sup).await;
     res
 }
 
@@ -631,6 +637,7 @@ pub async fn start_service_cmd(
 ) -> Result<ServiceStatusInfo, String> {
     let res = start_service(&app, &sup, &service_id, port).await;
     let _ = app.emit("services-changed", ());
+    crate::tray::refresh_tray_menu(&app, &sup).await;
     res
 }
 
@@ -642,6 +649,7 @@ pub async fn stop_service_cmd(
 ) -> Result<(), String> {
     let res = stop_service(&sup, &service_id).await;
     let _ = app.emit("services-changed", ());
+    crate::tray::refresh_tray_menu(&app, &sup).await;
     res
 }
 
@@ -654,6 +662,7 @@ pub async fn restart_service_cmd(
 ) -> Result<ServiceStatusInfo, String> {
     let res = restart_service(&app, &sup, &service_id, port).await;
     let _ = app.emit("services-changed", ());
+    crate::tray::refresh_tray_menu(&app, &sup).await;
     res
 }
 
@@ -664,6 +673,7 @@ pub async fn start_all_services_cmd(
 ) -> Result<Vec<String>, String> {
     let res = start_all_services(&app, &sup).await;
     let _ = app.emit("services-changed", ());
+    crate::tray::refresh_tray_menu(&app, &sup).await;
     res
 }
 
@@ -674,6 +684,7 @@ pub async fn stop_all_services_cmd(
 ) -> Result<(), String> {
     stop_all_services(&sup).await;
     let _ = app.emit("services-changed", ());
+    crate::tray::refresh_tray_menu(&app, &sup).await;
     Ok(())
 }
 
@@ -710,6 +721,7 @@ pub async fn add_local_site_cmd(
     if caddy_running || apache_running {
         let _ = app.emit("services-changed", ());
     }
+    crate::tray::refresh_tray_menu(&app, &sup).await;
     Ok(sites)
 }
 
@@ -734,6 +746,7 @@ pub async fn remove_local_site_cmd(
         let _ = restart_service(&app, &sup, "apache", None).await;
     }
     let _ = app.emit("services-changed", ());
+    crate::tray::refresh_tray_menu(&app, &sup).await;
     Ok(sites)
 }
 
@@ -759,10 +772,15 @@ pub async fn get_network_status_cmd() -> Result<NetworkStatus, String> {
 }
 
 #[tauri::command]
-pub async fn sync_hosts_file_cmd() -> Result<NetworkStatus, String> {
-    tokio::task::spawn_blocking(sync_hosts_file)
+pub async fn sync_hosts_file_cmd(
+    app: AppHandle,
+    sup: State<'_, SharedSupervisor>,
+) -> Result<NetworkStatus, String> {
+    let res = tokio::task::spawn_blocking(sync_hosts_file)
         .await
-        .map_err(|e| format!("Hosts sync failed: {}", e))?
+        .map_err(|e| format!("Hosts sync failed: {}", e))?;
+    crate::tray::refresh_tray_menu(&app, &sup).await;
+    res
 }
 
 #[tauri::command]
@@ -1093,18 +1111,43 @@ struct GithubLatestRelease {
     html_url: String,
 }
 
-fn parse_semver_tuple(raw: &str) -> (u64, u64, u64) {
+fn parse_semver_key(raw: &str) -> (u64, u64, u64, u8, u8, u64) {
     let cleaned = raw.trim().trim_start_matches(['v', 'V']);
-    let core = cleaned.split('-').next().unwrap_or(cleaned);
+    let mut split = cleaned.splitn(2, '-');
+    let core = split.next().unwrap_or(cleaned);
+    let pre = split.next();
+
     let mut parts = core.split('.');
     let major = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
     let minor = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
     let patch = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-    (major, minor, patch)
+
+    // SemVer ordering: prerelease (0) < stable (1); alpha (1) < beta (2) < rc (3)
+    match pre {
+        None | Some("") => (major, minor, patch, 1, 0, 0),
+        Some(tag) => {
+            let lower = tag.to_ascii_lowercase();
+            let pre_rank = if lower.starts_with("alpha") {
+                1
+            } else if lower.starts_with("beta") {
+                2
+            } else if lower.starts_with("rc") {
+                3
+            } else {
+                0
+            };
+            let pre_num = lower
+                .rsplit(|c: char| !c.is_ascii_digit())
+                .find(|s| !s.is_empty())
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0);
+            (major, minor, patch, 0, pre_rank, pre_num)
+        }
+    }
 }
 
 fn is_newer_version(current: &str, latest: &str) -> bool {
-    parse_semver_tuple(latest) > parse_semver_tuple(current)
+    parse_semver_key(latest) > parse_semver_key(current)
 }
 
 #[tauri::command]
@@ -1246,4 +1289,20 @@ pub async fn get_system_stats_cmd(
     })
     .await
     .map_err(|e| format!("Telemetry sampling failed: {}", e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn semver_comparison_handles_beta_and_stable_releases() {
+        assert!(is_newer_version("0.1.0-beta.1", "0.1.0-beta.2"));
+        assert!(!is_newer_version("0.1.0-beta.2", "0.1.0-beta.2"));
+        assert!(!is_newer_version("0.1.0-beta.2", "0.1.0-beta.1"));
+        assert!(is_newer_version("0.1.0-beta.2", "0.1.0-rc.1"));
+        assert!(is_newer_version("0.1.0-beta.2", "0.1.0"));
+        assert!(!is_newer_version("0.1.0", "0.1.0-beta.2"));
+        assert!(is_newer_version("0.1.0", "0.1.1"));
+    }
 }
