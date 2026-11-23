@@ -1708,6 +1708,7 @@ pub async fn stop_all_services(sup: &SharedSupervisor) {
         let _ = stop_service(sup, &id).await;
     });
     futures_util::future::join_all(futs).await;
+    stop_php_site_workers(sup).await;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

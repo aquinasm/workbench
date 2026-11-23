@@ -11,13 +11,40 @@ pub mod telemetry;
 
 use services::{stop_all_services, ServiceSupervisor, SharedSupervisor};
 use std::sync::Arc;
+#[cfg(not(target_os = "macos"))]
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    Emitter, Manager, RunEvent,
+    Emitter, Manager, RunEvent, WindowEvent,
 };
 use telemetry::{SharedTelemetry, TelemetryState};
 use tokio::sync::Mutex;
+
+fn show_main_window(app: &tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    }
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn hide_to_tray(app: &tauri::AppHandle, window: &tauri::Window) {
+    let _ = window.hide();
+    #[cfg(target_os = "macos")]
+    {
+        // Hide from macOS Dock & Cmd+Tab while keeping Workbench alive in the menubar tray
+        let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -44,13 +71,28 @@ pub fn run() {
                 let _tray = TrayIconBuilder::new()
                     .icon(icon)
                     .menu(&menu)
+                    // On macOS, left-click opens the menubar menu; on Windows/Linux, right-click opens the menu
+                    // and left-click restores the main window.
+                    .show_menu_on_left_click(cfg!(target_os = "macos"))
                     .tooltip("Workbench — Local Development Environment")
+                    .on_tray_icon_event(|tray, event| {
+                        #[cfg(not(target_os = "macos"))]
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            show_main_window(tray.app_handle());
+                        }
+                        #[cfg(target_os = "macos")]
+                        {
+                            let _ = (tray, event);
+                        }
+                    })
                     .on_menu_event(|app, event| match event.id.as_ref() {
                         "show" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
+                            show_main_window(app);
                         }
                         "start_all" => {
                             let app_h = app.clone();
@@ -77,6 +119,14 @@ pub fn run() {
             }
 
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                // Keep Workbench and all running services alive in the system tray / menubar
+                // when closing the window on macOS, Windows, and Linux.
+                api.prevent_close();
+                hide_to_tray(window.app_handle(), window);
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_config,
@@ -148,9 +198,16 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Workbench");
 
-    app.run(move |_app_handle, event| {
-        if let RunEvent::Exit = event {
+    app.run(move |app_handle, event| match event {
+        #[cfg(target_os = "macos")]
+        RunEvent::Reopen { .. } => {
+            show_main_window(app_handle);
+        }
+        RunEvent::Exit => {
             tauri::async_runtime::block_on(stop_all_services(&sup_for_exit));
+        }
+        _ => {
+            let _ = app_handle;
         }
     });
 }
