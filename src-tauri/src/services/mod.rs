@@ -2626,7 +2626,11 @@ fn caddy_local_root_cert_path() -> Option<PathBuf> {
     }
     #[cfg(target_os = "linux")]
     {
-        dirs::data_dir().map(|d| d.join("caddy/pki/authorities/local/root.crt"))
+        dirs::data_dir()
+            .map(|d| d.join("caddy/pki/authorities/local/root.crt"))
+            .or_else(|| {
+                dirs::home_dir().map(|h| h.join(".local/share/caddy/pki/authorities/local/root.crt"))
+            })
     }
     #[cfg(target_os = "windows")]
     {
@@ -2635,15 +2639,15 @@ fn caddy_local_root_cert_path() -> Option<PathBuf> {
 }
 
 pub async fn trust_local_ca(app: &AppHandle, sup: &SharedSupervisor) -> Result<String, String> {
-    let caddy = find_caddy_binary().ok_or_else(|| {
+    let _caddy = find_caddy_binary().ok_or_else(|| {
         "Caddy is required for automatic local HTTPS certificates. Install Caddy in Services first."
             .to_string()
     })?;
 
-    let cert_path = caddy_local_root_cert_path();
+    let mut cert_path = caddy_local_root_cert_path();
     let cert_exists = cert_path.as_ref().map(|p| p.is_file()).unwrap_or(false);
 
-    // Ensure Caddy is running if the local CA hasn't been initialized yet (or on non-macOS where `caddy trust` queries localhost:2019)
+    // Ensure Caddy is running if the local CA hasn't been initialized yet
     let needs_running_caddy = !cert_exists || !cfg!(target_os = "macos");
     if needs_running_caddy && check_port_available(2019) {
         let already_supervised = {
@@ -2656,7 +2660,7 @@ pub async fn trust_local_ca(app: &AppHandle, sup: &SharedSupervisor) -> Result<S
         // Give Caddy a moment to initialize its local PKI and bind :2019
         for _ in 0..15 {
             if !check_port_available(2019)
-                && cert_path.as_ref().map(|p| p.is_file()).unwrap_or(true)
+                && cert_path.as_ref().map(|p| p.is_file()).unwrap_or(false)
             {
                 break;
             }
@@ -2664,19 +2668,42 @@ pub async fn trust_local_ca(app: &AppHandle, sup: &SharedSupervisor) -> Result<S
         }
     }
 
+    // Trigger Caddy PKI generation or download root CA certificate directly from Caddy API if not on disk
+    if !cert_path.as_ref().map(|p| p.is_file()).unwrap_or(false) {
+        if let Ok(client) = reqwest::Client::builder()
+            .timeout(Duration::from_secs(3))
+            .build()
+        {
+            if let Ok(resp) = client.get("http://127.0.0.1:2019/pki/ca/local").send().await {
+                if let Ok(text) = resp.text().await {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if let Some(pem) = json.get("root_certificate").and_then(|v| v.as_str()) {
+                            let mut written = false;
+                            if let Some(ref target) = cert_path {
+                                if let Some(parent) = target.parent() {
+                                    let _ = fs::create_dir_all(parent);
+                                }
+                                if fs::write(target, pem).is_ok() {
+                                    written = true;
+                                }
+                            }
+                            if !written {
+                                let fallback = std::env::temp_dir().join("workbench-caddy-local-root.crt");
+                                if fs::write(&fallback, pem).is_ok() {
+                                    cert_path = Some(fallback);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+
     #[cfg(target_os = "macos")]
     {
-        // Trigger Caddy's local PKI generation if root.crt still doesn't exist yet
         if let Some(ref cert) = cert_path {
-            if !cert.is_file() {
-                if let Ok(client) = reqwest::Client::builder()
-                    .timeout(Duration::from_secs(3))
-                    .build()
-                {
-                    let _ = client.get("http://127.0.0.1:2019/pki/ca/local").send().await;
-                }
-                tokio::time::sleep(Duration::from_millis(400)).await;
-            }
             if cert.is_file() {
                 let cert_str = cert.to_string_lossy().to_string();
                 let login_keychain = dirs::home_dir()
@@ -2711,33 +2738,213 @@ pub async fn trust_local_ca(app: &AppHandle, sup: &SharedSupervisor) -> Result<S
                 });
             }
         }
+        Err("Caddy root certificate file could not be generated. Please ensure Caddy is running and try again.".to_string())
     }
 
-    let out = tokio::task::spawn_blocking(move || std::process::Command::new(caddy).arg("trust").output())
+    #[cfg(target_os = "linux")]
+    {
+        let cert = cert_path.ok_or_else(|| {
+            "Could not locate Caddy's root certificate. Ensure Caddy is installed and running.".to_string()
+        })?;
+        if !cert.is_file() {
+            return Err(format!(
+                "Caddy root certificate was not found at {}. Start Caddy in Services and try again.",
+                cert.display()
+            ));
+        }
+
+        let cert_str = cert.to_string_lossy().to_string();
+        let unique_ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let tmp_dir = std::env::temp_dir();
+        let script_path = tmp_dir.join(format!(".ca-trust-{}-{}.sh", std::process::id(), unique_ts));
+
+        let sh_body = format!(
+            r#"#!/bin/sh
+set -e
+CERT="{cert}"
+
+if [ ! -f "$CERT" ]; then
+    echo "Certificate file not found: $CERT" >&2
+    exit 1
+fi
+
+installed=0
+
+# Fedora / RHEL / CentOS / Rocky / AlmaLinux / Amazon Linux
+if [ -d /etc/pki/ca-trust/source/anchors ] || command -v update-ca-trust >/dev/null 2>&1; then
+    mkdir -p /etc/pki/ca-trust/source/anchors
+    cp "$CERT" /etc/pki/ca-trust/source/anchors/workbench-caddy-local-ca.crt
+    chmod 644 /etc/pki/ca-trust/source/anchors/workbench-caddy-local-ca.crt
+    (update-ca-trust extract 2>/dev/null || update-ca-trust 2>/dev/null || true)
+    installed=1
+elif [ -d /usr/local/share/ca-certificates ] || command -v update-ca-certificates >/dev/null 2>&1; then
+    mkdir -p /usr/local/share/ca-certificates
+    cp "$CERT" /usr/local/share/ca-certificates/workbench-caddy-local-ca.crt
+    chmod 644 /usr/local/share/ca-certificates/workbench-caddy-local-ca.crt
+    (update-ca-certificates 2>/dev/null || true)
+    installed=1
+elif [ -d /etc/ca-certificates/trust-source/anchors ]; then
+    cp "$CERT" /etc/ca-certificates/trust-source/anchors/workbench-caddy-local-ca.crt
+    chmod 644 /etc/ca-certificates/trust-source/anchors/workbench-caddy-local-ca.crt
+    (update-ca-trust extract 2>/dev/null || true)
+    installed=1
+elif [ -d /etc/pki/trust/anchors ]; then
+    cp "$CERT" /etc/pki/trust/anchors/workbench-caddy-local-ca.crt
+    chmod 644 /etc/pki/trust/anchors/workbench-caddy-local-ca.crt
+    (update-ca-certificates 2>/dev/null || true)
+    installed=1
+fi
+
+if [ "$installed" -eq 0 ]; then
+    echo "Could not find a supported system CA trust directory." >&2
+    exit 1
+fi
+"#,
+            cert = cert_str
+        );
+
+        fs::write(&script_path, &sh_body)
+            .map_err(|e| format!("Failed writing CA install script: {}", e))?;
+        let script_str = script_path.to_string_lossy().to_string();
+
+        let out = tokio::task::spawn_blocking(move || {
+            std::process::Command::new("pkexec")
+                .args(["sh", &script_str])
+                .output()
+        })
+        .await
+        .map_err(|e| format!("Trust CA task failed: {}", e))?
+        .map_err(|e| format!("Failed launching pkexec for CA installation: {}", e))?;
+
+        let _ = fs::remove_file(&script_path);
+
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            return Err(if err.is_empty() || out.status.code() == Some(126) {
+                "Administrator permission was cancelled.".to_string()
+            } else {
+                err
+            });
+        }
+
+        // Install to user's NSS stores (Chrome/Chromium/Firefox) if certutil is available
+        let cert_str_clone = cert_str.clone();
+        let nss_installed = tokio::task::spawn_blocking(move || {
+            let mut updated = false;
+            if let Some(home) = dirs::home_dir() {
+                // Chrome / Chromium NSS database
+                let nssdb = home.join(".pki/nssdb");
+                let _ = fs::create_dir_all(&nssdb);
+                let db_arg = format!("sql:{}", nssdb.display());
+                if let Ok(cmd) = std::process::Command::new("certutil")
+                    .args([
+                        "-d",
+                        &db_arg,
+                        "-A",
+                        "-t",
+                        "C,,",
+                        "-n",
+                        "Workbench Caddy Local CA",
+                        "-i",
+                        &cert_str_clone,
+                    ])
+                    .output()
+                {
+                    if cmd.status.success() {
+                        updated = true;
+                    }
+                }
+
+                // Firefox profiles in ~/.mozilla/firefox
+                let ff_dir = home.join(".mozilla/firefox");
+                if let Ok(entries) = fs::read_dir(&ff_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_dir() && path.join("cert9.db").exists() {
+                            let prof_arg = format!("sql:{}", path.display());
+                            let _ = std::process::Command::new("certutil")
+                                .args([
+                                    "-d",
+                                    &prof_arg,
+                                    "-A",
+                                    "-t",
+                                    "C,,",
+                                    "-n",
+                                    "Workbench Caddy Local CA",
+                                    "-i",
+                                    &cert_str_clone,
+                                ])
+                                .output();
+                        }
+                    }
+                }
+            }
+            updated
+        })
+        .await
+        .unwrap_or(false);
+
+        let msg = if nss_installed {
+            "Caddy local root CA added to Linux system trust store and browser NSS store.".to_string()
+        } else {
+            "Caddy local root CA added to Linux system trust store.".to_string()
+        };
+        return Ok(msg);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let out = tokio::task::spawn_blocking(move || {
+            std::process::Command::new(_caddy).arg("trust").output()
+        })
         .await
         .map_err(|e| format!("Trust CA task failed: {}", e))?
         .map_err(|e| format!("Failed running 'caddy trust': {}", e))?;
 
-    let combined = format!(
-        "{}\n{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
-    )
-    .trim()
-    .to_string();
-
-    if out.status.success() {
-        Ok(if combined.is_empty() {
-            "Local development root CA trusted successfully.".to_string()
-        } else {
-            combined
-        })
-    } else {
-        Err(if combined.is_empty() {
+        if out.status.success() {
+            return Ok("Caddy local root CA added to Windows Trusted Root Certification Authorities.".to_string());
+        }
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let err = if !stderr.is_empty() { stderr } else { stdout };
+        return Err(if err.is_empty() {
             format!("'caddy trust' exited with status {}", out.status)
         } else {
-            combined
-        })
+            err
+        });
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        let out = tokio::task::spawn_blocking(move || std::process::Command::new(_caddy).arg("trust").output())
+            .await
+            .map_err(|e| format!("Trust CA task failed: {}", e))?
+            .map_err(|e| format!("Failed running 'caddy trust': {}", e))?;
+
+        let combined = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        )
+        .trim()
+        .to_string();
+
+        if out.status.success() {
+            Ok(if combined.is_empty() {
+                "Local development root CA trusted successfully.".to_string()
+            } else {
+                combined
+            })
+        } else {
+            Err(if combined.is_empty() {
+                format!("'caddy trust' exited with status {}", out.status)
+            } else {
+                combined
+            })
+        }
     }
 }
 
