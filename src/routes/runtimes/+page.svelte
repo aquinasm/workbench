@@ -426,36 +426,30 @@
 		</section>
 	{:else}
 		<div
-			class="divide-y overflow-hidden rounded-xl border"
-			style="background-color: var(--bg-surface); border-color: var(--border-subtle);"
+			class="divide-y overflow-hidden rounded-[16px]"
+			style="background-color: var(--bg-surface); border-color: var(--border-subtle); box-shadow: var(--shadow-card);"
 		>
 			{#each filteredRuntimes as rt (`${rt.tool}:${rt.version}`)}
 				{@const progKey = `${rt.tool}:${rt.version}`}
 				{@const progress = wb.downloadProgress[progKey]}
-				<div class="px-4 py-3.5 space-y-2">
+				<div class="px-4 py-3.5 space-y-2" style="border-color: var(--border-subtle);">
 					<div class="flex items-center justify-between gap-4">
 						<div class="min-w-0 flex-1">
 							<div class="flex flex-wrap items-center gap-2">
 								<span class="text-sm font-semibold" style="color: var(--text-primary);">
 									{rt.label}
 								</span>
-								<span
-									class="border px-1.5 py-0.5 font-mono text-[11px]"
-									style="border-color: var(--border-subtle); background-color: var(--bg-elevated); color: var(--text-secondary);"
-								>
+								<span class="wb-pill font-mono text-[11px]">
 									{rt.is_external ? rt.version.replace(/^ext-/, 'v') : `v${rt.version}`}
 								</span>
 								{#if rt.is_external}
-									<span
-										class="border px-1.5 py-0.5 font-mono text-[11px] font-semibold uppercase"
-										style="border-color: var(--border-strong); background-color: var(--bg-elevated); color: var(--text-secondary);"
-									>
+									<span class="wb-pill font-mono text-[10.5px] font-semibold uppercase">
 										EXTERNAL{rt.source ? ` · ${rt.source}` : ''}
 									</span>
 								{/if}
 								{#if rt.is_default}
 									<span
-										class="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold"
+										class="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
 										style="background-color: var(--accent-soft); color: var(--accent);"
 									>
 										<Star class="h-3 w-3" />
@@ -463,7 +457,7 @@
 									</span>
 								{:else if rt.installed && !rt.is_external}
 									<span
-										class="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium"
+										class="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium"
 										style="background-color: var(--bg-elevated); color: var(--success);"
 									>
 										<CheckCircle2 class="h-3 w-3" />
@@ -511,8 +505,10 @@
 									<button
 										type="button"
 										onclick={() => togglePhpInspector(rt.version)}
-										class="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium transition hover:opacity-85"
-										style="border-color: var(--border-subtle); background-color: {phpInspectVersion === rt.version ? 'var(--accent-soft)' : 'var(--bg-app)'}; color: {phpInspectVersion === rt.version ? 'var(--accent)' : 'var(--text-primary)'};"
+										class="wb-btn text-xs"
+										style={phpInspectVersion === rt.version
+											? 'background-color: var(--accent-soft); color: var(--accent);'
+											: ''}
 									>
 										<SlidersHorizontal class="h-3 w-3" />
 										Extensions & php.ini
@@ -522,8 +518,7 @@
 									<button
 										type="button"
 										onclick={() => wb.setDefaultRuntime(rt.tool, rt.version)}
-										class="rounded-md border px-2.5 py-1 text-xs font-medium transition hover:opacity-85"
-										style="border-color: var(--border-subtle); background-color: var(--bg-app); color: var(--text-primary);"
+										class="wb-btn text-xs"
 									>
 										Set Default
 									</button>

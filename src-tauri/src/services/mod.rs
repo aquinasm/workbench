@@ -1051,6 +1051,10 @@ async fn sync_php_site_workers(sup: &SharedSupervisor, sites: &[LocalSite]) {
     let _ = fs::create_dir_all(&router_dir);
     let router_path = router_dir.join("workbench-php-router.php");
     let router_src = r#"<?php
+if (strtolower($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https') {
+    $_SERVER['HTTPS'] = 'on';
+    $_SERVER['SERVER_PORT'] = '443';
+}
 $uri = urldecode(parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/');
 $docRoot = $_SERVER['DOCUMENT_ROOT'] ?? getcwd();
 $file = $docRoot . $uri;
@@ -1167,7 +1171,7 @@ pub fn generate_caddyfile(
         };
         out.push_str(&format!("# LAN-exposed site: {}\n", lan_site.domain));
         out.push_str(&format!("{} {{\n", lan_addr));
-        write_caddy_site_body(&mut out, lan_site, &php_ports);
+        write_caddy_site_body(&mut out, lan_site, &php_ports, false);
         out.push_str("}\n\n");
     } else {
         out.push_str(&format!(
@@ -1182,7 +1186,7 @@ pub fn generate_caddyfile(
         port, pma_port
     ));
     out.push_str(&format!(
-        "https://phpmyadmin.test:{} {{\n\ttls internal\n\treverse_proxy 127.0.0.1:{}\n}}\n\n",
+        "https://phpmyadmin.test:{} {{\n\ttls internal\n\treverse_proxy 127.0.0.1:{} {{\n\t\theader_up X-Forwarded-Proto https\n\t\theader_up X-Forwarded-Port 443\n\t}}\n}}\n\n",
         https_port, pma_port
     ));
 
@@ -1193,20 +1197,20 @@ pub fn generate_caddyfile(
             format!("http://{}:{}", site.domain, port)
         };
         out.push_str(&format!("{} {{\n", host));
-        write_caddy_site_body(&mut out, site, &php_ports);
+        write_caddy_site_body(&mut out, site, &php_ports, false);
         out.push_str("}\n\n");
 
         if site.https {
             let domain_only = site.domain.split(':').next().unwrap_or(&site.domain);
             out.push_str(&format!("https://{}:{} {{\n", domain_only, https_port));
             out.push_str("\ttls internal\n");
-            write_caddy_site_body(&mut out, site, &php_ports);
+            write_caddy_site_body(&mut out, site, &php_ports, true);
             out.push_str("}\n\n");
         }
     }
 
     // Reverse-proxy Apache sites through Caddy so both Caddy and Apache .test domains
-    // work simultaneously without port numbers (and with optional automatic HTTPS).
+    // work simultaneously with optional automatic HTTPS.
     for site in valid_apache_sites {
         let domain_only = site.domain.split(':').next().unwrap_or(&site.domain);
         out.push_str(&format!(
@@ -1215,7 +1219,7 @@ pub fn generate_caddyfile(
         ));
         if site.https {
             out.push_str(&format!(
-                "https://{}:{} {{\n\ttls internal\n\treverse_proxy 127.0.0.1:{} {{\n\t\theader_up Host {{http.request.host}}\n\t}}\n}}\n\n",
+                "https://{}:{} {{\n\ttls internal\n\treverse_proxy 127.0.0.1:{} {{\n\t\theader_up Host {{http.request.host}}\n\t\theader_up X-Forwarded-Proto https\n\t\theader_up X-Forwarded-Port 443\n\t}}\n}}\n\n",
                 domain_only, https_port, apache_port
             ));
         }
@@ -1224,16 +1228,35 @@ pub fn generate_caddyfile(
     out
 }
 
-fn write_caddy_site_body(out: &mut String, site: &LocalSite, php_ports: &HashMap<String, u16>) {
+fn write_caddy_site_body(
+    out: &mut String,
+    site: &LocalSite,
+    php_ports: &HashMap<String, u16>,
+    is_https: bool,
+) {
     if site.mode == "proxy" {
         let target_port = site.proxy_port.unwrap_or(5173);
-        out.push_str(&format!("\treverse_proxy 127.0.0.1:{}\n", target_port));
+        if is_https {
+            out.push_str(&format!(
+                "\treverse_proxy 127.0.0.1:{} {{\n\t\theader_up X-Forwarded-Proto https\n\t\theader_up X-Forwarded-Port 443\n\t}}\n",
+                target_port
+            ));
+        } else {
+            out.push_str(&format!("\treverse_proxy 127.0.0.1:{}\n", target_port));
+        }
     } else if site.mode == "php" {
         let worker_port = php_ports
             .get(&site.domain.to_ascii_lowercase())
             .copied()
             .unwrap_or(19100);
-        out.push_str(&format!("\treverse_proxy 127.0.0.1:{}\n", worker_port));
+        if is_https {
+            out.push_str(&format!(
+                "\treverse_proxy 127.0.0.1:{} {{\n\t\theader_up X-Forwarded-Proto https\n\t\theader_up X-Forwarded-Port 443\n\t}}\n",
+                worker_port
+            ));
+        } else {
+            out.push_str(&format!("\treverse_proxy 127.0.0.1:{}\n", worker_port));
+        }
     } else {
         let root = match &site.docroot_subpath {
             Some(sub) if !sub.trim().is_empty() => Path::new(&site.project_path).join(sub),
@@ -2662,11 +2685,11 @@ pub async fn trust_local_ca(app: &AppHandle, sup: &SharedSupervisor) -> Result<S
                     .map(|p| p.to_string_lossy().to_string());
 
                 // Run `security add-trusted-cert` directly inside the user's interactive Aqua GUI session
-                // (without `osascript ... with administrator privileges`, which blocks SecTrustSettingsSetTrustSettings
-                // on macOS Sonoma/Sequoia/Tahoe with "authorization was denied since no user interaction was possible").
+                // with explicit `-p ssl -p basic` trust policies so Chrome, Safari, Edge, Arc, and curl
+                // all trust Caddy's local root CA cleanly.
                 let out = tokio::task::spawn_blocking(move || {
                     let mut cmd = std::process::Command::new("security");
-                    cmd.args(["add-trusted-cert", "-r", "trustRoot"]);
+                    cmd.args(["add-trusted-cert", "-r", "trustRoot", "-p", "ssl", "-p", "basic"]);
                     if let Some(kc) = login_keychain {
                         cmd.args(["-k", &kc]);
                     }

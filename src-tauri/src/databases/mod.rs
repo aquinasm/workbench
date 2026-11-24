@@ -941,6 +941,75 @@ fn run_dump_to_file(
     Ok(bytes)
 }
 
+/// Sanitizes a single SQL line during import so MySQL 8, RDS, and MariaDB dumps
+/// import cleanly into local MariaDB without collation, GTID, sandbox, or DEFINER errors.
+fn sanitize_sql_import_line(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    // Skip MariaDB dump sandbox pragma (fails when piped to mismatched clients)
+    if trimmed.starts_with("/*!999999\\-") || trimmed.starts_with("/*!999999-") {
+        return None;
+    }
+    // Skip RDS / MySQL 8 GTID & binlog directives unsupported on local MariaDB
+    let upper = trimmed.to_ascii_uppercase();
+    if upper.starts_with("SET @@GLOBAL.GTID_PURGED")
+        || upper.starts_with("SET @@SESSION.SQL_LOG_BIN")
+    {
+        return None;
+    }
+
+    let mut out = if line.contains("DEFINER=") || line.contains("definer=") {
+        strip_sql_definer_line(line)
+    } else {
+        line.to_string()
+    };
+
+    // Rewrite MySQL 8.0 0900 collations to MariaDB-compatible equivalents
+    if out.contains("_0900_") {
+        out = out
+            .replace("utf8mb4_0900_ai_ci", "utf8mb4_unicode_ci")
+            .replace("utf8mb4_0900_as_ci", "utf8mb4_unicode_ci")
+            .replace("utf8mb4_0900_as_cs", "utf8mb4_unicode_ci")
+            .replace("utf8mb4_0900_bin", "utf8mb4_bin")
+            .replace("utf8mb3_0900_ai_ci", "utf8mb3_unicode_ci");
+    }
+
+    Some(out)
+}
+
+fn stream_sanitized_sql<R: Read, W: Write>(reader: R, writer: &mut W) -> std::io::Result<()> {
+    writer.write_all(
+        b"SET FOREIGN_KEY_CHECKS=0;\nSET UNIQUE_CHECKS=0;\nSET SQL_MODE='NO_AUTO_VALUE_ON_ZERO';\n",
+    )?;
+    let mut buf_reader = BufReader::with_capacity(256 * 1024, reader);
+    let mut raw_line = Vec::with_capacity(8192);
+    loop {
+        raw_line.clear();
+        let n = buf_reader.read_until(b'\n', &mut raw_line)?;
+        if n == 0 {
+            break;
+        }
+        // Only run string sanitization on valid UTF-8 lines that contain known MySQL/MariaDB hazards;
+        // binary BLOB INSERT lines pass through verbatim without allocating or corrupting bytes.
+        if let Ok(text) = std::str::from_utf8(&raw_line) {
+            if text.contains("999999")
+                || text.contains("GTID_PURGED")
+                || text.contains("SQL_LOG_BIN")
+                || text.contains("DEFINER=")
+                || text.contains("definer=")
+                || text.contains("_0900_")
+            {
+                if let Some(cleaned) = sanitize_sql_import_line(text) {
+                    writer.write_all(cleaned.as_bytes())?;
+                }
+                continue;
+            }
+        }
+        writer.write_all(&raw_line)?;
+    }
+    writer.write_all(b"\nSET FOREIGN_KEY_CHECKS=1;\nSET UNIQUE_CHECKS=1;\n")?;
+    writer.flush()
+}
+
 fn run_import_from_file(
     app: &AppHandle,
     server: &DbServerProfile,
@@ -1024,7 +1093,9 @@ fn run_import_from_file(
         cmd.arg(cf.arg());
     }
     cmd.args(build_base_args(server))
-        .arg("--default-character-set=utf8mb4");
+        .arg("--default-character-set=utf8mb4")
+        .arg("--max-allowed-packet=512M")
+        .arg("--force");
     if let Some(db) = target_db {
         cmd.arg(db);
     }
@@ -1042,7 +1113,7 @@ fn run_import_from_file(
         }
     };
 
-    let mut stdin = child
+    let stdin = child
         .stdin
         .take()
         .ok_or_else(|| "Failed opening SQL client stdin".to_string())?;
@@ -1066,28 +1137,70 @@ fn run_import_from_file(
         file_path: input_path.to_string(),
     };
 
+    let mut buf_stdin = BufWriter::with_capacity(256 * 1024, stdin);
     let copy_res = if is_gzip {
-        let mut decoder = GzDecoder::new(progress_reader);
-        std::io::copy(&mut decoder, &mut stdin)
+        let decoder = GzDecoder::new(progress_reader);
+        stream_sanitized_sql(decoder, &mut buf_stdin)
     } else {
-        let mut reader = progress_reader;
-        std::io::copy(&mut reader, &mut stdin)
+        stream_sanitized_sql(progress_reader, &mut buf_stdin)
     };
-    drop(stdin);
+    drop(buf_stdin);
 
     let status = child
         .wait()
         .map_err(|e| format!("Failed waiting for SQL import: {}", e))?;
     let stderr_text = stderr_handle.join().unwrap_or_default().trim().to_string();
 
+    let real_errors: Vec<&str> = stderr_text
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            !t.is_empty()
+                && !t.starts_with("Warning:")
+                && !t.contains("Using a password on the command line")
+        })
+        .collect();
+
     if !status.success() {
-        let msg = if stderr_text.is_empty() {
-            format!("Import failed with status {}", status)
-        } else {
-            stderr_text
-        };
-        emit_err(&msg);
-        return Err(msg);
+        let is_fatal_conn = real_errors.iter().any(|l| {
+            l.contains("ERROR 2002")
+                || l.contains("ERROR 2003")
+                || l.contains("ERROR 1045")
+                || l.contains("ERROR 1049")
+        });
+        if is_fatal_conn || copy_res.is_err() {
+            let msg = if real_errors.is_empty() {
+                format!("Import failed with status {}", status)
+            } else {
+                real_errors.join("\n")
+            };
+            emit_err(&msg);
+            return Err(msg);
+        }
+
+        let first_warn = real_errors
+            .first()
+            .copied()
+            .unwrap_or("Some statements were skipped.");
+        let _ = app.emit(
+            "db-transfer-progress",
+            DbTransferProgressEvent {
+                op: "import".to_string(),
+                target: target_label.to_string(),
+                stage: "warning".to_string(),
+                bytes_processed: total_bytes,
+                total_bytes,
+                percent: 100,
+                file_path: Some(input_path.to_string()),
+                message: format!(
+                    "Imported into {} with {} warning(s): {}",
+                    target_label,
+                    real_errors.len(),
+                    first_warn
+                ),
+            },
+        );
+        return Ok(());
     }
     if let Err(e) = copy_res {
         let msg = format!("Failed streaming SQL backup: {}", e);

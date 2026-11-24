@@ -370,10 +370,10 @@
 						style="background-color: var(--bg-app); color: var(--text-secondary);"
 					>
 						<div class="flex items-center justify-between gap-2">
-							<span style="color: var(--text-muted);">DNS Mode</span>
+							<span style="color: var(--text-muted);">DNS Resolver</span>
 							<strong style="color: {wb.networkStatus.wildcard_dns_enabled ? 'var(--success)' : 'var(--text-primary)'};">
 								{wb.networkStatus.wildcard_dns_enabled
-									? 'Wildcard *.test (Zero-prompt)'
+									? '*.test (Active)'
 									: wb.networkStatus.hosts_path}
 							</strong>
 						</div>
@@ -388,7 +388,7 @@
 							<span style="color: var(--text-muted);">Routing</span>
 							<strong style="color: {wb.networkStatus.portless_enabled ? 'var(--success)' : 'var(--text-primary)'};">
 								{wb.networkStatus.portless_enabled
-									? 'Portless (:80 / :443)'
+									? 'HTTP :80 / HTTPS :443'
 									: `HTTP :${wb.networkStatus.caddy_port} / HTTPS :${wb.networkStatus.caddy_https_port}`}
 							</strong>
 						</div>

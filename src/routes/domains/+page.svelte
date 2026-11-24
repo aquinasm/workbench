@@ -250,13 +250,13 @@
 				disabled={wb.syncingDns}
 				onclick={() => wb.syncHostsDns()}
 				class="wb-btn"
-				title="Configure wildcard *.test DNS and portless :80/:443 routing"
+				title="Configure .test DNS and local HTTP/HTTPS routing"
 			>
 				<RefreshCw class="h-3.5 w-3.5 {wb.syncingDns ? 'animate-spin' : ''}" />
 				{#if wb.networkStatus?.wildcard_dns_enabled && wb.networkStatus?.portless_enabled}
-					Re-verify DNS
+					Sync DNS
 				{:else}
-					Enable Wildcard DNS
+					Setup .test DNS
 				{/if}
 			</button>
 			<button
@@ -292,13 +292,13 @@
 								: 'var(--warning)'};"
 					></span>
 					<span style="color: var(--text-secondary);">DNS:</span>
-					<strong style="color: var(--text-primary);">
+					<strong class="font-mono" style="color: var(--text-primary);">
 						{#if wb.networkStatus.wildcard_dns_enabled}
-							Wildcard *.test (Zero-prompt)
+							*.test
 						{:else if wb.networkStatus.missing_domains.length === 0}
 							Synced ({wb.networkStatus.synced_domains.length})
 						{:else}
-							{wb.networkStatus.missing_domains.length} pending sync
+							{wb.networkStatus.missing_domains.length} pending
 						{/if}
 					</strong>
 				</div>
@@ -313,7 +313,7 @@
 					<span style="color: var(--text-secondary);">Routing:</span>
 					<strong class="font-mono" style="color: var(--text-primary);">
 						{wb.networkStatus.portless_enabled
-							? 'Portless (:80 / :443)'
+							? 'HTTP :80 / HTTPS :443'
 							: `:${wb.networkStatus.caddy_port} / :${wb.networkStatus.caddy_https_port}`}
 					</strong>
 				</div>
@@ -328,7 +328,7 @@
 
 			{#if !wb.networkStatus.wildcard_dns_enabled || !wb.networkStatus.portless_enabled}
 				<span class="text-[11px]" style="color: var(--text-muted);">
-					Click <strong style="color: var(--text-primary);">Enable Wildcard DNS</strong> once for automatic portless <span class="font-mono">*.test</span> resolution.
+					Run <strong style="color: var(--text-primary);">Setup .test DNS</strong> to enable automatic local domain resolution.
 				</span>
 			{/if}
 		</section>
@@ -347,7 +347,7 @@
 						{editingOriginalDomain ? `Edit ${editingOriginalDomain}` : 'Link New Local Domain'}
 					</h2>
 					<p class="text-xs" style="color: var(--text-secondary);">
-						Caddy and Apache sites both run on portless <span class="font-mono">.test</span> URLs with optional HTTPS.
+						Assign a local <span class="font-mono">.test</span> domain backed by Caddy or Apache.
 					</p>
 				</div>
 				<button
