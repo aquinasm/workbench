@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 import type {
+	AppUpdateProgressEvent,
 	CleanupStats,
 	DbServerInspection,
 	DbServerProfile,
@@ -217,8 +218,12 @@ export const api = {
 	onDbTransferProgress: (cb: (payload: DbTransferProgressEvent) => void): Promise<UnlistenFn> =>
 		listen<DbTransferProgressEvent>('db-transfer-progress', (e) => cb(e.payload)),
 
-	// GitHub Releases update checker
+	// GitHub Releases update checker & 1-click self-updater
 	checkForUpdates: () => invoke<UpdateCheckResult>('check_for_updates_cmd'),
+	installAppUpdate: (tag?: string) =>
+		invoke<string>('install_app_update_cmd', { tag: tag ?? null }),
+	onAppUpdateProgress: (cb: (payload: AppUpdateProgressEvent) => void): Promise<UnlistenFn> =>
+		listen<AppUpdateProgressEvent>('app-update-progress', (e) => cb(e.payload)),
 
 	// Live host system telemetry (CPU, RAM, Network)
 	getSystemStats: () => invoke<SystemStats>('get_system_stats_cmd')

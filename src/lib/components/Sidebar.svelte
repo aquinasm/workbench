@@ -234,7 +234,23 @@
 				</span>
 			</a>
 			<div class="flex items-center justify-between pt-0.5 text-xs">
-				{#if wb.checkingUpdates}
+				{#if wb.updatingApp}
+					<span
+						class="inline-flex w-full items-center justify-between rounded-full px-2.5 py-1 font-mono text-[11px] font-semibold"
+						style="background-color: var(--accent-soft); color: var(--accent);"
+					>
+						<span class="inline-flex items-center gap-1.5 truncate">
+							<RefreshCw class="h-3 w-3 shrink-0 animate-spin" />
+							{#if wb.appUpdateProgress?.stage === 'restarting'}
+								Restarting...
+							{:else if wb.appUpdateProgress?.stage === 'installing'}
+								Installing...
+							{:else}
+								Updating {wb.appUpdateProgress?.percent ?? 0}%
+							{/if}
+						</span>
+					</span>
+				{:else if wb.checkingUpdates}
 					<span class="inline-flex items-center gap-1.5 font-mono text-[11px]" style="color: var(--text-muted);">
 						<RefreshCw class="h-3 w-3 animate-spin" />
 						Checking updates...
@@ -242,9 +258,10 @@
 				{:else if wb.updateInfo.update_available && wb.updateInfo.latest_version}
 					<button
 						type="button"
-						onclick={() => wb.updateInfo.release_url && api.openExternalUrl(wb.updateInfo.release_url)}
+						onclick={() => wb.installAppUpdate()}
 						class="inline-flex w-full items-center justify-between rounded-full px-2.5 py-1 font-mono text-[11px] font-semibold transition hover:opacity-85"
 						style="background-color: var(--accent-soft); color: var(--accent);"
+						title="Download and install v{wb.updateInfo.latest_version}"
 					>
 						<span>Update v{wb.updateInfo.latest_version}</span>
 						<ArrowUpRight class="h-3 w-3" />

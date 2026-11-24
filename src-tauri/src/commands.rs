@@ -1105,10 +1105,25 @@ pub struct UpdateCheckResult {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct AppUpdateProgressEvent {
+    pub stage: String, // "downloading" | "installing" | "restarting" | "error"
+    pub percent: u8,
+    pub message: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct GithubReleaseAsset {
+    name: String,
+    browser_download_url: String,
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct GithubLatestRelease {
     tag_name: String,
     html_url: String,
+    #[serde(default)]
+    assets: Vec<GithubReleaseAsset>,
 }
 
 fn parse_semver_key(raw: &str) -> (u64, u64, u64, u8, u8, u64) {
@@ -1276,6 +1291,338 @@ pub async fn check_for_updates_cmd() -> Result<UpdateCheckResult, String> {
         checked: true,
         error: None,
     })
+}
+
+#[tauri::command]
+pub async fn install_app_update_cmd(
+    app: AppHandle,
+    sup: State<'_, SharedSupervisor>,
+    tag: Option<String>,
+) -> Result<String, String> {
+    use futures_util::StreamExt;
+    use std::io::Write;
+
+    let emit = |stage: &str, percent: u8, message: String| {
+        let _ = app.emit(
+            "app-update-progress",
+            AppUpdateProgressEvent {
+                stage: stage.to_string(),
+                percent,
+                message,
+            },
+        );
+    };
+
+    let current = env!("CARGO_PKG_VERSION");
+    let client = reqwest::Client::builder()
+        .user_agent(format!("Workbench/{}", current))
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .read_timeout(std::time::Duration::from_secs(45))
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+
+    emit("downloading", 2, "Fetching release metadata...".to_string());
+
+    let list_url = format!(
+        "https://api.github.com/repos/{}/releases?per_page=5",
+        GITHUB_REPO
+    );
+    let body = client
+        .get(&list_url)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed reaching GitHub Releases: {}", e))?
+        .text()
+        .await
+        .map_err(|e| format!("Failed reading GitHub Releases response: {}", e))?;
+
+    let releases: Vec<GithubLatestRelease> = serde_json::from_str(&body)
+        .map_err(|e| format!("Invalid GitHub Releases JSON: {}", e))?;
+
+    let target_release = if let Some(ref wanted_tag) = tag {
+        let clean_wanted = wanted_tag.trim().trim_start_matches(['v', 'V']);
+        releases
+            .into_iter()
+            .find(|r| r.tag_name.trim().trim_start_matches(['v', 'V']) == clean_wanted)
+    } else {
+        releases.into_iter().next()
+    }
+    .ok_or_else(|| "Target release not found on GitHub.".to_string())?;
+
+    // Select platform-appropriate release asset
+    let asset = {
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        {
+            target_release
+                .assets
+                .iter()
+                .find(|a| a.name == "Workbench_aarch64.app.tar.gz")
+        }
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        {
+            target_release
+                .assets
+                .iter()
+                .find(|a| a.name.ends_with(".msi"))
+        }
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        {
+            target_release
+                .assets
+                .iter()
+                .find(|a| a.name.ends_with(".AppImage"))
+        }
+        #[cfg(not(any(
+            all(target_os = "macos", target_arch = "aarch64"),
+            all(target_os = "windows", target_arch = "x86_64"),
+            all(target_os = "linux", target_arch = "x86_64")
+        )))]
+        {
+            None::<&GithubReleaseAsset>
+        }
+    }
+    .ok_or_else(|| {
+        format!(
+            "No compatible auto-update asset found in {}.",
+            target_release.tag_name
+        )
+    })?;
+
+    if !asset.browser_download_url.starts_with("https://github.com/")
+        && !asset
+            .browser_download_url
+            .starts_with("https://objects.githubusercontent.com/")
+        && !asset
+            .browser_download_url
+            .starts_with("https://release-assets.githubusercontent.com/")
+    {
+        return Err(format!(
+            "Refusing untrusted update URL: {}",
+            asset.browser_download_url
+        ));
+    }
+
+    #[cfg(target_os = "linux")]
+    let appimage_target = std::env::var("APPIMAGE").ok().filter(|p| !p.trim().is_empty());
+    #[cfg(target_os = "linux")]
+    if appimage_target.is_none() {
+        return Err(format!(
+            "OPEN_RELEASE:{}",
+            target_release.html_url
+        ));
+    }
+
+    let staging = crate::config::workbench_home()
+        .join("data")
+        .join(".update-staging");
+    if staging.exists() {
+        let _ = std::fs::remove_dir_all(&staging);
+    }
+    std::fs::create_dir_all(&staging)
+        .map_err(|e| format!("Failed creating update staging dir: {}", e))?;
+
+    let download_path = staging.join(&asset.name);
+    emit(
+        "downloading",
+        5,
+        format!("Downloading {}...", target_release.tag_name),
+    );
+
+    let resp = client
+        .get(&asset.browser_download_url)
+        .send()
+        .await
+        .map_err(|e| format!("Update download failed: {}", e))?;
+    if !resp.status().is_success() {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(format!("Update download returned HTTP {}", resp.status()));
+    }
+
+    let total = resp.content_length().unwrap_or(0);
+    let mut file = std::fs::File::create(&download_path)
+        .map_err(|e| format!("Failed creating update file: {}", e))?;
+    let mut stream = resp.bytes_stream();
+    let mut downloaded: u64 = 0;
+    let mut last_pct: u8 = 5;
+
+    while let Some(chunk_res) = stream.next().await {
+        let chunk = chunk_res.map_err(|e| format!("Update download stream error: {}", e))?;
+        file.write_all(&chunk)
+            .map_err(|e| format!("Failed writing update file: {}", e))?;
+        downloaded += chunk.len() as u64;
+        if total > 0 {
+            let pct = (5 + ((downloaded as f64 / total as f64) * 85.0) as u8).min(90);
+            if pct >= last_pct + 2 || pct == 90 {
+                last_pct = pct;
+                emit(
+                    "downloading",
+                    pct,
+                    format!("Downloading {} ({}%)...", target_release.tag_name, pct),
+                );
+            }
+        }
+    }
+    drop(file);
+
+    emit("installing", 94, "Preparing installation...".to_string());
+
+    #[cfg(target_os = "macos")]
+    {
+        let extract_dir = staging.join("extracted");
+        std::fs::create_dir_all(&extract_dir)
+            .map_err(|e| format!("Failed creating extract dir: {}", e))?;
+
+        let dl_clone = download_path.clone();
+        let ex_clone = extract_dir.clone();
+        let prep_res = tokio::task::spawn_blocking(move || -> Result<std::path::PathBuf, String> {
+            let out = std::process::Command::new("tar")
+                .args(["-xzf"])
+                .arg(&dl_clone)
+                .arg("-C")
+                .arg(&ex_clone)
+                .output()
+                .map_err(|e| format!("Failed extracting update archive: {}", e))?;
+            if !out.status.success() {
+                return Err(format!(
+                    "Failed extracting update archive: {}",
+                    String::from_utf8_lossy(&out.stderr).trim()
+                ));
+            }
+            let new_app = ex_clone.join("Workbench.app");
+            if !new_app.is_dir() {
+                return Err("Workbench.app not found inside update archive.".to_string());
+            }
+            let _ = std::process::Command::new("xattr")
+                .args(["-cr"])
+                .arg(&new_app)
+                .output();
+            let _ = std::process::Command::new("codesign")
+                .args(["--force", "--deep", "--sign", "-"])
+                .arg(&new_app)
+                .output();
+            Ok(new_app)
+        })
+        .await
+        .map_err(|e| format!("Update extraction task error: {}", e))??;
+
+        // Detect enclosing .app bundle path (defaulting to /Applications/Workbench.app)
+        let target_app = std::env::current_exe()
+            .ok()
+            .and_then(|exe| {
+                exe.ancestors()
+                    .find(|p| p.extension().and_then(|e| e.to_str()) == Some("app"))
+                    .map(|p| p.to_path_buf())
+            })
+            .unwrap_or_else(|| std::path::PathBuf::from("/Applications/Workbench.app"));
+
+        emit("restarting", 98, "Restarting Workbench...".to_string());
+        stop_all_services(&sup).await;
+
+        let pid = std::process::id().to_string();
+        let swap_script = r#"
+PID="$1"
+NEW_APP="$2"
+TARGET_APP="$3"
+STAGING="$4"
+i=0
+while kill -0 "$PID" 2>/dev/null && [ "$i" -lt 40 ]; do
+  sleep 0.15
+  i=$((i + 1))
+done
+BACKUP="${TARGET_APP}.old"
+rm -rf "$BACKUP"
+if [ -d "$TARGET_APP" ]; then
+  mv "$TARGET_APP" "$BACKUP"
+fi
+if mv "$NEW_APP" "$TARGET_APP"; then
+  rm -rf "$BACKUP"
+else
+  if [ -d "$BACKUP" ]; then
+    mv "$BACKUP" "$TARGET_APP"
+  fi
+fi
+rm -rf "$STAGING"
+open -n "$TARGET_APP"
+"#;
+
+        std::process::Command::new("/bin/sh")
+            .args(["-c", swap_script, "--", &pid])
+            .arg(&prep_res)
+            .arg(&target_app)
+            .arg(&staging)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| format!("Failed launching updater helper: {}", e))?;
+
+        let app_exit = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            app_exit.exit(0);
+        });
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        emit("restarting", 98, "Launching installer...".to_string());
+        stop_all_services(&sup).await;
+        std::process::Command::new("msiexec")
+            .arg("/i")
+            .arg(&download_path)
+            .arg("/passive")
+            .spawn()
+            .map_err(|e| format!("Failed launching MSI installer: {}", e))?;
+        let app_exit = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            app_exit.exit(0);
+        });
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(target_img) = appimage_target {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&download_path, std::fs::Permissions::from_mode(0o755));
+            emit("restarting", 98, "Restarting Workbench...".to_string());
+            stop_all_services(&sup).await;
+            let pid = std::process::id().to_string();
+            let swap_script = r#"
+PID="$1"
+NEW_IMG="$2"
+TARGET_IMG="$3"
+STAGING="$4"
+i=0
+while kill -0 "$PID" 2>/dev/null && [ "$i" -lt 40 ]; do
+  sleep 0.15
+  i=$((i + 1))
+done
+mv -f "$NEW_IMG" "$TARGET_IMG"
+chmod +x "$TARGET_IMG"
+rm -rf "$STAGING"
+"$TARGET_IMG" >/dev/null 2>&1 &
+"#;
+            std::process::Command::new("/bin/sh")
+                .args(["-c", swap_script, "--", &pid])
+                .arg(&download_path)
+                .arg(&target_img)
+                .arg(&staging)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .map_err(|e| format!("Failed launching AppImage updater: {}", e))?;
+            let app_exit = app.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                app_exit.exit(0);
+            });
+        }
+    }
+
+    Ok(target_release.tag_name)
 }
 
 #[tauri::command]

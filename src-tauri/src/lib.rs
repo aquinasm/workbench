@@ -107,6 +107,7 @@ pub fn run() {
             commands::export_db_server_cmd,
             commands::import_db_server_cmd,
             commands::check_for_updates_cmd,
+            commands::install_app_update_cmd,
             commands::get_system_stats_cmd,
         ])
         .build(tauri::generate_context!())

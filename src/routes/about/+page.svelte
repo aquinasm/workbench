@@ -78,13 +78,18 @@
 			</div>
 
 			<div class="flex flex-wrap items-center gap-2">
-				{#if wb.updateInfo.update_available && wb.updateInfo.latest_version}
+				{#if wb.updatingApp}
+					<button type="button" disabled class="wb-btn-primary">
+						<RefreshCw class="h-3.5 w-3.5 animate-spin" />
+						{wb.appUpdateProgress?.message ?? 'Updating...'}
+					</button>
+				{:else if wb.updateInfo.update_available && wb.updateInfo.latest_version}
 					<button
 						type="button"
-						onclick={() => api.openExternalUrl(wb.updateInfo.release_url ?? RELEASES_URL)}
+						onclick={() => wb.installAppUpdate()}
 						class="wb-btn-primary"
 					>
-						Download v{wb.updateInfo.latest_version}
+						Install v{wb.updateInfo.latest_version}
 						<ArrowUpRight class="h-3.5 w-3.5" />
 					</button>
 				{:else}

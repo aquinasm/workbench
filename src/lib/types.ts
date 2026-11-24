@@ -312,6 +312,12 @@ export interface UpdateCheckResult {
 	error: string | null;
 }
 
+export interface AppUpdateProgressEvent {
+	stage: 'downloading' | 'installing' | 'restarting' | 'error';
+	percent: number;
+	message: string;
+}
+
 export interface DbTransferProgressEvent {
 	op: 'export' | 'import' | string;
 	target: string;

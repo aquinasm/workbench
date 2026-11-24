@@ -1,6 +1,7 @@
 import { api } from '$lib/api';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import type {
+	AppUpdateProgressEvent,
 	CleanupStats,
 	DbTransferProgressEvent,
 	DeleteMode,
@@ -80,6 +81,8 @@ class WorkbenchStore {
 		error: null
 	});
 	checkingUpdates = $state(false);
+	updatingApp = $state(false);
+	appUpdateProgress = $state<AppUpdateProgressEvent | null>(null);
 
 	// Local DNS, SSL & LAN network status
 	networkStatus = $state<NetworkStatus | null>(null);
@@ -136,6 +139,9 @@ class WorkbenchStore {
 
 		// Attach live event listeners immediately and retain UnlistenFn handles for cleanup
 		void Promise.all([
+			api.onAppUpdateProgress((ev) => {
+				this.appUpdateProgress = ev;
+			}),
 			api.onDbTransferProgress((ev) => {
 				this.dbTransfer = ev;
 			}),
@@ -644,6 +650,33 @@ class WorkbenchStore {
 			this.showToast(`Unlinked ${domain}`, 'info');
 		} catch (e) {
 			this.showToast(`Failed removing site: ${e}`, 'error');
+		}
+	}
+
+	async installAppUpdate() {
+		if (this.updatingApp) return;
+		this.updatingApp = true;
+		this.appUpdateProgress = {
+			stage: 'downloading',
+			percent: 0,
+			message: 'Starting update...'
+		};
+		try {
+			const tag = this.updateInfo.latest_version
+				? `v${this.updateInfo.latest_version}`
+				: undefined;
+			await api.installAppUpdate(tag);
+		} catch (e) {
+			const msg = String(e);
+			if (msg.startsWith('OPEN_RELEASE:')) {
+				const url = msg.slice('OPEN_RELEASE:'.length);
+				void api.openExternalUrl(url);
+				this.showToast('Opened GitHub Release page for package update.', 'info');
+			} else {
+				this.showToast(`Update failed: ${msg}`, 'error');
+			}
+			this.updatingApp = false;
+			this.appUpdateProgress = null;
 		}
 	}
 }
