@@ -50,9 +50,10 @@ fn open_url_in_browser(url: &str) {
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("cmd")
-            .args(["/C", "start", "", url])
-            .spawn();
+        use std::os::windows::process::CommandExt;
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.creation_flags(0x08000000);
+        let _ = cmd.args(["/C", "start", "", url]).spawn();
     }
 }
 

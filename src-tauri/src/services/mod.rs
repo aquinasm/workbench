@@ -153,7 +153,13 @@ fn probe_service_version(id: &str, bin: &str) -> Option<String> {
         "apache" => &["-v"],
         _ => return None,
     };
-    let out = std::process::Command::new(bin).args(args).output().ok()?;
+    let mut cmd = std::process::Command::new(bin);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    let out = cmd.args(args).output().ok()?;
     if !out.status.success() {
         return None;
     }
@@ -1026,9 +1032,10 @@ async fn stop_php_site_workers(sup: &SharedSupervisor) {
             }
             #[cfg(target_os = "windows")]
             {
-                let _ = std::process::Command::new("taskkill")
-                    .args(["/PID", &pid.to_string(), "/F"])
-                    .status();
+                use std::os::windows::process::CommandExt;
+                let mut cmd = std::process::Command::new("taskkill");
+                cmd.creation_flags(0x08000000);
+                let _ = cmd.args(["/PID", &pid.to_string(), "/F"]).status();
             }
         }
         let _ = tokio::time::timeout(Duration::from_secs(2), proc_info.child.wait()).await;
@@ -1094,6 +1101,8 @@ require $docRoot . '/index.php';
         }
 
         let mut cmd = Command::new(&php_bin);
+        #[cfg(windows)]
+        cmd.creation_flags(0x08000000);
         cmd.env("PHP_CLI_SERVER_WORKERS", "4")
             .args(["-S", &format!("127.0.0.1:{}", worker_port), "-t"])
             .arg(&docroot)
@@ -1577,6 +1586,11 @@ pub async fn start_service(
                     });
                 if let Some(init) = init_bin {
                     let mut init_cmd = std::process::Command::new(init);
+                    #[cfg(windows)]
+                    {
+                        use std::os::windows::process::CommandExt;
+                        init_cmd.creation_flags(0x08000000);
+                    }
                     if let Some(ref base) = managed_basedir {
                         init_cmd.arg(format!("--basedir={}", base.display()));
                     }
@@ -1677,6 +1691,9 @@ pub async fn start_service(
         }
         _ => return Err(format!("Unsupported service: {}", service_id)),
     };
+
+    #[cfg(windows)]
+    cmd.creation_flags(0x08000000);
 
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
@@ -1814,9 +1831,10 @@ pub async fn stop_service(sup: &SharedSupervisor, service_id: &str) -> Result<()
             }
             #[cfg(target_os = "windows")]
             {
-                let _ = std::process::Command::new("taskkill")
-                    .args(["/PID", &pid.to_string()])
-                    .status();
+                use std::os::windows::process::CommandExt;
+                let mut cmd = std::process::Command::new("taskkill");
+                cmd.creation_flags(0x08000000);
+                let _ = cmd.args(["/PID", &pid.to_string()]).status();
             }
         }
 
@@ -1894,8 +1912,13 @@ pub async fn reload_caddy_or_restart(app: &AppHandle, sup: &SharedSupervisor) ->
     if let Some(bin) = find_caddy_binary() {
         let cf = caddyfile.clone();
         let reload_ok = tokio::task::spawn_blocking(move || {
-            std::process::Command::new(bin)
-                .args(["reload", "--config"])
+            let mut cmd = std::process::Command::new(bin);
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x08000000);
+            }
+            cmd.args(["reload", "--config"])
                 .arg(&cf)
                 .output()
                 .map(|o| o.status.success())
@@ -2209,7 +2232,13 @@ pub fn get_local_lan_ip() -> Option<String> {
 pub fn hosts_file_path() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
-        PathBuf::from(r"C:\Windows\System32\drivers\etc\hosts")
+        if let Ok(sys_root) = std::env::var("SystemRoot") {
+            PathBuf::from(sys_root).join(r"System32\drivers\etc\hosts")
+        } else if let Ok(win_dir) = std::env::var("windir") {
+            PathBuf::from(win_dir).join(r"System32\drivers\etc\hosts")
+        } else {
+            PathBuf::from(r"C:\Windows\System32\drivers\etc\hosts")
+        }
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -2301,8 +2330,10 @@ fn is_portless_routing_active(caddy_port: u16) -> bool {
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("netsh")
-            .args(["interface", "portproxy", "show", "v4tov4"])
+        use std::os::windows::process::CommandExt;
+        let mut cmd = std::process::Command::new("netsh");
+        cmd.creation_flags(0x08000000);
+        cmd.args(["interface", "portproxy", "show", "v4tov4"])
             .output()
             .map(|o| {
                 let txt = String::from_utf8_lossy(&o.stdout);
@@ -2588,29 +2619,84 @@ pub fn sync_hosts_file() -> Result<NetworkStatus, String> {
 
     #[cfg(target_os = "windows")]
     {
-        // Copy staged hosts file + configure portless 80/443 loopback forwarding + flush DNS in one UAC prompt
-        let ps_inner = format!(
-            "Copy-Item -Force -LiteralPath $env:WB_HOSTS_SRC -Destination 'C:\\Windows\\System32\\drivers\\etc\\hosts'; \
-             netsh interface portproxy delete v4tov4 listenport=80 listenaddress=127.0.0.1 2>$null; \
-             netsh interface portproxy add v4tov4 listenport=80 listenaddress=127.0.0.1 connectport={cp} connectaddress=127.0.0.1; \
-             netsh interface portproxy delete v4tov4 listenport=443 listenaddress=127.0.0.1 2>$null; \
-             netsh interface portproxy add v4tov4 listenport=443 listenaddress=127.0.0.1 connectport={chp} connectaddress=127.0.0.1; \
-             ipconfig /flushdns",
+        let script_path =
+            tmp_dir.join(format!(".dns-sync-{}-{}.ps1", std::process::id(), unique_ts));
+        let ps_script = format!(
+            r#"Set-StrictMode -Off
+$hostsPath = '{hosts}'
+$stagedPath = '{staged}'
+
+if (Test-Path $hostsPath) {{
+    try {{
+        Set-ItemProperty -Path $hostsPath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
+    }} catch {{}}
+}}
+
+$copied = $false
+try {{
+    Copy-Item -Force -LiteralPath $stagedPath -Destination $hostsPath
+    $copied = $true
+}} catch {{}}
+
+if (-not $copied) {{
+    try {{
+        [System.IO.File]::WriteAllText($hostsPath, [System.IO.File]::ReadAllText($stagedPath))
+        $copied = $true
+    }} catch {{}}
+}}
+
+try {{
+    netsh interface portproxy delete v4tov4 listenport=80 listenaddress=127.0.0.1 2>$null
+    netsh interface portproxy add v4tov4 listenport=80 listenaddress=127.0.0.1 connectport={cp} connectaddress=127.0.0.1
+    netsh interface portproxy delete v4tov4 listenport=443 listenaddress=127.0.0.1 2>$null
+    netsh interface portproxy add v4tov4 listenport=443 listenaddress=127.0.0.1 connectport={chp} connectaddress=127.0.0.1
+}} catch {{}}
+
+ipconfig /flushdns
+
+if (-not $copied) {{
+    exit 2
+}}
+"#,
+            hosts = hosts_path.to_string_lossy().replace('\'', "''"),
+            staged = staged_str.replace('\'', "''"),
             cp = caddy_port,
             chp = caddy_https_port,
         );
-        let ps = format!(
-            "Start-Process -Verb RunAs -Wait -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-Command',\"{}\")",
-            ps_inner.replace('"', "`\"")
+
+        fs::write(&script_path, &ps_script)
+            .map_err(|e| format!("Failed writing DNS setup script: {}", e))?;
+        let script_str = script_path.to_string_lossy().to_string();
+
+        let runner = format!(
+            "try {{ $p = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', '{}') -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode }} catch {{ exit 1 }}",
+            script_str.replace('\'', "''")
         );
-        let out = std::process::Command::new("powershell")
-            .env("WB_HOSTS_SRC", &staged_str)
-            .args(["-NoProfile", "-Command", &ps])
+
+        let mut cmd = std::process::Command::new("powershell");
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+        let out = cmd
+            .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &runner])
             .output()
             .map_err(|e| format!("Failed launching UAC prompt: {}", e))?;
+
         let _ = fs::remove_file(&staged);
+        let _ = fs::remove_file(&script_path);
+
         if !out.status.success() {
-            return Err("Administrator permission was cancelled or failed.".to_string());
+            let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            return Err(if err.is_empty() {
+                "Administrator permission was cancelled or could not be granted.".to_string()
+            } else {
+                err
+            });
+        }
+
+        // Verify that hosts file actually contains the updated entries
+        let check_hosts = fs::read_to_string(&hosts_path).unwrap_or_default();
+        if !desired.is_empty() && !check_hosts.contains(HOSTS_MARKER_START) {
+            return Err("Hosts file could not be updated. Please ensure an antivirus or security software is not locking the hosts file.".to_string());
         }
     }
 
@@ -2897,8 +2983,30 @@ fi
 
     #[cfg(target_os = "windows")]
     {
+        if let Some(ref cert) = cert_path {
+            if cert.is_file() {
+                let cert_str = cert.to_string_lossy().to_string();
+                let out = tokio::task::spawn_blocking(move || {
+                    use std::os::windows::process::CommandExt;
+                    let mut cmd = std::process::Command::new("certutil");
+                    cmd.creation_flags(0x08000000);
+                    cmd.args(["-addstore", "-f", "ROOT", &cert_str]).output()
+                })
+                .await
+                .map_err(|e| format!("Trust CA task failed: {}", e))?
+                .map_err(|e| format!("Failed running certutil: {}", e))?;
+
+                if out.status.success() {
+                    return Ok("Caddy local root CA added to Windows Trusted Root Certification Authorities.".to_string());
+                }
+            }
+        }
+
         let out = tokio::task::spawn_blocking(move || {
-            std::process::Command::new(_caddy).arg("trust").output()
+            use std::os::windows::process::CommandExt;
+            let mut cmd = std::process::Command::new(_caddy);
+            cmd.creation_flags(0x08000000);
+            cmd.arg("trust").output()
         })
         .await
         .map_err(|e| format!("Trust CA task failed: {}", e))?

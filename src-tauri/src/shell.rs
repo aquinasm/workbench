@@ -373,7 +373,13 @@ fn probe_tool(bins: &[&str], args: &[&str]) -> (bool, Option<String>, Option<Str
     };
 
     let source = Some(classify_source(&bin_path));
-    let version = Command::new(&bin_path)
+    let mut cmd = Command::new(&bin_path);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    let version = cmd
         .args(args)
         .output()
         .ok()

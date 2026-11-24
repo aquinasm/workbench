@@ -1013,7 +1013,13 @@ pub fn sync_shims() -> Result<ShimSyncReport, String> {
 // --- Rustup Delegation ---
 
 pub fn get_rustup_status() -> RustupStatus {
-    let output = Command::new("rustup")
+    let mut cmd = Command::new("rustup");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    let output = cmd
         .args(["toolchain", "list"])
         .output();
 
@@ -1050,7 +1056,13 @@ pub fn get_rustup_status() -> RustupStatus {
 }
 
 pub fn run_rustup_action(args: &[&str]) -> Result<String, String> {
-    let out = Command::new("rustup")
+    let mut cmd = Command::new("rustup");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    let out = cmd
         .args(args)
         .output()
         .map_err(|e| format!("Failed executing rustup: {}", e))?;

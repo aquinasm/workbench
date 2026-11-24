@@ -8,6 +8,8 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Clone, Serialize)]
@@ -259,6 +261,8 @@ fn run_sql_stdin(server: &DbServerProfile, sql: &str) -> Result<String, String> 
     };
 
     let mut cmd = Command::new(bin);
+    #[cfg(windows)]
+    cmd.creation_flags(0x08000000);
     if let Some(ref cf) = _creds_file {
         cmd.arg(cf.arg());
     }
@@ -303,6 +307,8 @@ fn run_sql_query(server: &DbServerProfile, sql: &str) -> Result<String, String> 
     };
 
     let mut cmd = Command::new(bin);
+    #[cfg(windows)]
+    cmd.creation_flags(0x08000000);
     if let Some(ref cf) = _creds_file {
         cmd.arg(cf.arg());
     }
@@ -737,6 +743,8 @@ fn run_dump_to_file(
     };
 
     let mut cmd = Command::new(bin);
+    #[cfg(windows)]
+    cmd.creation_flags(0x08000000);
     if let Some(ref cf) = _creds_file {
         cmd.arg(cf.arg());
     }
@@ -1089,6 +1097,8 @@ fn run_import_from_file(
     };
 
     let mut cmd = Command::new(bin);
+    #[cfg(windows)]
+    cmd.creation_flags(0x08000000);
     if let Some(ref cf) = _creds_file {
         cmd.arg(cf.arg());
     }

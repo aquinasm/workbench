@@ -108,7 +108,13 @@ pub fn ensure_php_ini(base: &Path) -> Result<PathBuf, String> {
 
 fn query_loaded_modules(php_bin: &Path, php_dir: &Path) -> HashSet<String> {
     let mut set = HashSet::new();
-    let out = Command::new(php_bin)
+    let mut cmd = Command::new(php_bin);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    let out = cmd
         .arg("-m")
         .env("PHPRC", php_dir)
         .output();

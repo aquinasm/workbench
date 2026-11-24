@@ -243,6 +243,8 @@ pub async fn wake_project_cmd(app: AppHandle, project_path: String) -> Result<()
 
             let mut command = if cfg!(target_os = "windows") {
                 let mut c = Command::new("cmd");
+                #[cfg(windows)]
+                c.creation_flags(0x08000000);
                 c.arg("/C").arg(program).args(prog_args);
                 c
             } else {
@@ -1568,8 +1570,13 @@ open -n "$TARGET_APP"
     {
         emit("restarting", 98, "Launching installer...".to_string());
         stop_all_services(&sup).await;
-        std::process::Command::new("msiexec")
-            .arg("/i")
+        let mut cmd = std::process::Command::new("msiexec");
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
+        cmd.arg("/i")
             .arg(&download_path)
             .arg("/passive")
             .spawn()
